@@ -1,0 +1,9 @@
+*.o
+*.d
+*.elf
+npu_sim
+test_conv
+test_postproc
+testdata/*.bin
+*.swp
+*~
