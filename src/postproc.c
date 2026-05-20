@@ -16,8 +16,9 @@ static inline int32_t apply_activation(const layer_config_t *cfg, int32_t val)
     if (cfg->post_ctrl & POST_RELU_EN) {
         if (val < 0) val = 0;
     } else if (cfg->post_ctrl & POST_RELU6_EN) {
+        /* ReLU6: lower clamp to 0; upper clamp already handled by Stage 5
+         * (converter sets clamp_max = round(6.0 / output_scale)) */
         if (val < 0) val = 0;
-        /* ReLU6: clamp to 6*scale — in quantized domain this is just clamp_max */
     }
 
     if (cfg->post_ctrl & POST_LUT_EN) {
