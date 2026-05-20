@@ -109,7 +109,7 @@ int32_t npu_postproc_add(const layer_config_t *cfg, int32_t val_a, int32_t val_b
 
 /* ─── Full tensor post-processing (CONV_REQ / RELU_ONLY / PASSTHROUGH) ─── */
 void npu_postprocess(const layer_config_t *cfg,
-                     const int32_t *acc,
+                     const int64_t *acc,
                      int num_h, int num_w, int num_c,
                      tensor_t *output)
 {
@@ -123,11 +123,11 @@ void npu_postprocess(const layer_config_t *cfg,
 
                 switch (ppu_mode) {
                 case PPU_MODE_CONV_REQ:
-                    out_val = npu_postproc_perchannel(cfg, (int64_t)acc[idx], c);
+                    out_val = npu_postproc_perchannel(cfg, acc[idx], c);
                     break;
 
                 case PPU_MODE_RELU_ONLY: {
-                    int32_t val = acc[idx];
+                    int32_t val = (int32_t)acc[idx];
                     if (val < (int32_t)cfg->clamp_min) val = (int32_t)cfg->clamp_min;
                     if (val > (int32_t)cfg->clamp_max) val = (int32_t)cfg->clamp_max;
                     out_val = apply_activation(cfg, val);
@@ -136,7 +136,7 @@ void npu_postprocess(const layer_config_t *cfg,
 
                 case PPU_MODE_PASSTHROUGH:
                 default:
-                    out_val = acc[idx];
+                    out_val = (int32_t)acc[idx];
                     break;
                 }
 

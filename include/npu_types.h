@@ -44,13 +44,13 @@ enum {
 #define POST_BIAS_EN     (1 << 6)
 #define POST_INT16_OUT   (1 << 7)
 
-/* ─── Per-channel requantize parameters (10 bytes/channel, packed) ─── */
+/* ─── Per-channel requantize parameters (14 bytes/channel, packed) ─── */
 typedef struct {
     uint16_t M;          /* [14:0] 15-bit unsigned multiplier, bit15=0 */
     uint8_t  S;          /* [5:0]  6-bit shift amount */
     uint8_t  _reserved0;
     int16_t  zp;         /* [15:0] 16-bit signed output zero point */
-    int32_t  bias_q;     /* [31:0] 32-bit signed quantized bias */
+    int64_t  bias_q;     /* [63:0] 64-bit signed quantized bias */
 } __attribute__((packed)) perchannel_param_t;
 
 /* ─── Add node rescale parameters (8 bytes total) ─── */
@@ -118,6 +118,9 @@ typedef struct {
 
     /* Add node params (only valid when PPU_MODE_ADD) */
     add_param_t *add_params;         /* single instance or NULL */
+
+    /* Residual source layer index for Add (-1 = none) */
+    int8_t   residual_src;
 
     /* LUT (256 entries) */
     int8_t   lut_i8[256];

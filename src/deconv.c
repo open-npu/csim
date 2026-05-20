@@ -16,7 +16,7 @@ void npu_deconv(const layer_config_t *cfg,
                 const tensor_t *input,
                 const int8_t *weights,
                 const int32_t *bias,
-                int32_t *output_acc)
+                int64_t *output_acc)
 {
     const int in_h   = cfg->in_h;
     const int in_w   = cfg->in_w;
@@ -46,7 +46,7 @@ void npu_deconv(const layer_config_t *cfg,
     for (int oh = 0; oh < out_h; oh++) {
         for (int ow = 0; ow < out_w; ow++) {
             for (int oc = 0; oc < out_c; oc++) {
-                int32_t acc = 0;
+                int64_t acc = 0;
 
                 for (int fh = 0; fh < kh; fh++) {
                     int eh = oh + pad_t - fh;
@@ -68,11 +68,11 @@ void npu_deconv(const layer_config_t *cfg,
                             if (is_int16) {
                                 int16_t in_val = tensor_get_i16(input, ih, iw, ic);
                                 int16_t w_val  = weights_i16[w_base + ic];
-                                acc += (int32_t)in_val * (int32_t)w_val;
+                                acc += (int64_t)in_val * (int64_t)w_val;
                             } else {
                                 int8_t in_val = tensor_get_i8(input, ih, iw, ic);
                                 int8_t w_val  = weights[w_base + ic];
-                                acc += (int32_t)in_val * (int32_t)w_val;
+                                acc += (int64_t)in_val * (int64_t)w_val;
                             }
                         }
                     }

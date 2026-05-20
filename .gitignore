@@ -7,3 +7,6 @@ test_postproc
 testdata/*.bin
 *.swp
 *~
+test_add_e2e
+testdata/*.bin
+testdata/*.txt

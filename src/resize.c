@@ -11,7 +11,7 @@
 
 void npu_resize(const layer_config_t *cfg,
                 const tensor_t *input,
-                int32_t *output_acc)
+                int64_t *output_acc)
 {
     const int in_h  = cfg->in_h;
     const int in_w  = cfg->in_w;
@@ -31,11 +31,11 @@ void npu_resize(const layer_config_t *cfg,
                 if (iw >= in_w) iw = in_w - 1;
 
                 for (int c = 0; c < ch; c++) {
-                    int32_t val;
+                    int64_t val;
                     if (is_int16) {
-                        val = (int32_t)tensor_get_i16(input, ih, iw, c);
+                        val = (int64_t)tensor_get_i16(input, ih, iw, c);
                     } else {
-                        val = (int32_t)tensor_get_i8(input, ih, iw, c);
+                        val = (int64_t)tensor_get_i8(input, ih, iw, c);
                     }
                     int out_idx = oh * out_w * ch + ow * ch + c;
                     output_acc[out_idx] = val;
@@ -88,7 +88,7 @@ void npu_resize(const layer_config_t *cfg,
                     val = (val + (1 << 15)) >> 16;
 
                     int out_idx = oh * out_w * ch + ow * ch + c;
-                    output_acc[out_idx] = val;
+                    output_acc[out_idx] = (int64_t)val;
                 }
             }
         }

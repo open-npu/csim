@@ -70,7 +70,7 @@ typedef struct {
     uint16_t param_ch_count;  /* number of output channels with per-ch params */
     uint8_t  has_lut;         /* 1 = LUT data follows */
     uint8_t  has_add;         /* 1 = add_param_t follows */
-    uint8_t  _reserved[1];
+    int8_t   residual_src;   /* -1=none, 0..N = layer index for Add input_b */
 } __attribute__((packed)) fixed_config_t;
 
 _Static_assert(sizeof(fixed_config_t) == 60, "fixed_config_t must be 60 bytes");
@@ -156,6 +156,7 @@ static int load_model(const char *path,
         cfg->clamp_min   = fc.clamp_min;
         cfg->clamp_max   = fc.clamp_max;
         cfg->in_zp       = fc.in_zp;
+        cfg->residual_src = fc.residual_src;
 
         /* Read per-channel params */
         if (fc.param_ch_count > 0) {
@@ -249,7 +250,7 @@ static int execute_layer(const layer_config_t *cfg,
 
     /* All other operators: compute → accumulator → postprocess */
     int out_elements = cfg->out_h * cfg->out_w * cfg->out_c;
-    int32_t *acc = (int32_t *)calloc(out_elements, sizeof(int32_t));
+    int64_t *acc = (int64_t *)calloc(out_elements, sizeof(int64_t));
     if (!acc) {
         fprintf(stderr, "Error: failed to allocate accumulator buffer\n");
         return -1;
@@ -360,6 +361,10 @@ int main(int argc, char *argv[])
     /* ─── Layer-by-layer inference ─── */
     int8_t *weight_ptr = weights;
 
+    /* Keep history of layer outputs for residual connections */
+    tensor_t *layer_outputs = (tensor_t *)calloc(header.num_layers, sizeof(tensor_t));
+    tensor_t input_tensor = current;  /* save reference to free later */
+
     for (uint32_t i = 0; i < header.num_layers; i++) {
         layer_config_t *cfg = &layers[i];
         printf("  Layer %u: op=%d, in=[%d×%d×%d], out=[%d×%d×%d]\n",
@@ -399,20 +404,51 @@ int main(int argc, char *argv[])
             weight_ptr += weight_bytes;
         }
 
+        /* Resolve residual input for Add nodes */
+        tensor_t *input_b = NULL;
+        if (cfg->op_type == OP_ELTWISE_ADD && cfg->residual_src >= 0) {
+            input_b = &layer_outputs[(int)cfg->residual_src];
+        }
+
         /* Execute */
-        int ret = execute_layer(cfg, &current, NULL, layer_weights, &output);
+        int ret = execute_layer(cfg, &current, input_b, layer_weights, &output);
         if (ret != 0) {
             fprintf(stderr, "Error: layer %u execution failed\n", i);
             tensor_free(&output);
             tensor_free(&current);
+            for (uint32_t j = 0; j < i; j++) tensor_free(&layer_outputs[j]);
+            free(layer_outputs);
             free_model(layers, header.num_layers, weights);
             return 1;
         }
 
-        /* Swap current ↔ output for next layer */
-        tensor_free(&current);
+        /* Store output in history */
+        layer_outputs[i] = output;
+        /* current now points to latest output (don't free old current separately,
+           it's already in layer_outputs from previous iteration) */
         current = output;
+
+        /* Debug: dump intermediate layer outputs if DUMP_LAYERS env var is set */
+        if (getenv("DUMP_LAYERS")) {
+            char dump_path[256];
+            snprintf(dump_path, sizeof(dump_path), "/tmp/csim_layer_%03u.bin", i);
+            FILE *fdump = fopen(dump_path, "wb");
+            if (fdump) {
+                int is_out16 = (cfg->post_ctrl & POST_INT16_OUT) ? 1 : 0;
+                size_t n = (size_t)cfg->out_h * cfg->out_w * cfg->out_c;
+                if (is_out16) {
+                    /* Write NHWC int16 data directly */
+                    fwrite(output.data_i16, sizeof(int16_t), n, fdump);
+                } else {
+                    fwrite(output.data, sizeof(int8_t), n, fdump);
+                }
+                fclose(fdump);
+                printf("    [DUMP] %s (%zu elements, %s)\n", dump_path, n, is_out16 ? "int16" : "int8");
+            }
+        }
     }
+
+    /* current is layer_outputs[num_layers-1], don't double free */
 
     /* ─── Save output (convert NHWC → NCHW) ─── */
     layer_config_t *last = &layers[header.num_layers - 1];
@@ -443,7 +479,11 @@ int main(int argc, char *argv[])
 
     /* Cleanup */
     free(output_nchw);
-    tensor_free(&current);
+    tensor_free(&input_tensor);
+    for (uint32_t i = 0; i < header.num_layers; i++) {
+        tensor_free(&layer_outputs[i]);
+    }
+    free(layer_outputs);
     free_model(layers, header.num_layers, weights);
     return 0;
 }

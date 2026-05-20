@@ -8,6 +8,7 @@
  */
 
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 #include "npu_types.h"
 #include "npu_operators.h"
@@ -18,7 +19,7 @@ static int tests_failed = 0;
 
 #define ASSERT_EQ(a, b, msg) do { \
     if ((a) != (b)) { \
-        printf("  FAIL: %s (expected %d, got %d)\n", msg, (int)(b), (int)(a)); \
+        printf("  FAIL: %s (expected %ld, got %ld)\n", msg, (long)(b), (long)(a)); \
         tests_failed++; \
     } else { \
         tests_passed++; \
@@ -54,7 +55,7 @@ static void test_conv2d_3x3_basic(void)
      * pos(1,0): 5+6+7+9+10+11+13+14+15 = 90
      * pos(1,1): 6+7+8+10+11+12+14+15+16 = 99
      */
-    int32_t acc[4] = {0};
+    int64_t acc[4] = {0};
     npu_conv2d(&cfg, &input, weights, NULL, acc);
 
     ASSERT_EQ(acc[0], 54, "conv2d[0,0]");
@@ -90,7 +91,7 @@ static void test_conv2d_3x3_pad1(void)
 
     /* With pad=1, center pixel sees all 9 neighbors = 9
      * Corner pixels see 4, edge pixels see 6 */
-    int32_t acc[9] = {0};
+    int64_t acc[9] = {0};
     npu_conv2d(&cfg, &input, weights, NULL, acc);
 
     ASSERT_EQ(acc[0], 4, "conv2d_pad[0,0] corner");
@@ -128,7 +129,7 @@ static void test_dwconv_3x3(void)
     int8_t weights[18];
     for (int i = 0; i < 18; i++) weights[i] = 1;
 
-    int32_t acc[2] = {0};
+    int64_t acc[2] = {0};
     npu_dwconv(&cfg, &input, weights, NULL, acc);
 
     /* ch0: 9 × 1 = 9, ch1: 9 × 2 = 18 */
@@ -156,7 +157,7 @@ static void test_fc_basic(void)
     /* Weights [2][4]: row0=[1,1,1,1], row1=[2,2,2,2] */
     int8_t weights[8] = {1,1,1,1, 2,2,2,2};
 
-    int32_t acc[2] = {0};
+    int64_t acc[2] = {0};
     npu_fc(&cfg, &input, weights, NULL, acc);
 
     /* oc0: 1+2+3+4=10, oc1: 2+4+6+8=20 */
@@ -182,7 +183,7 @@ static void test_pooling_max(void)
     tensor_t input = tensor_alloc_i8(4, 4, 1);
     for (int i = 0; i < 16; i++) input.data[i] = (int8_t)(i + 1);
 
-    int32_t acc[4] = {0};
+    int64_t acc[4] = {0};
     npu_pooling(&cfg, &input, acc);
 
     /* Max of each 2×2 window:
@@ -224,7 +225,7 @@ static void test_conv2d_int16(void)
     for (int i = 0; i < 9; i++) weights[i] = 2;
 
     /* Expected: sum(2 * (100..108)) = 2 * (100+101+...+108) = 2 * 936 = 1872 */
-    int32_t acc[1] = {0};
+    int64_t acc[1] = {0};
     npu_conv2d(&cfg, &input, (const int8_t *)weights, NULL, acc);
 
     ASSERT_EQ(acc[0], 1872, "conv2d INT16");
@@ -259,7 +260,7 @@ static void test_dwconv_int16(void)
     for (int i = 0; i < 9; i++) weights[i] = 3;
     for (int i = 9; i < 18; i++) weights[i] = 2;
 
-    int32_t acc[2] = {0};
+    int64_t acc[2] = {0};
     npu_dwconv(&cfg, &input, (const int8_t *)weights, NULL, acc);
 
     /* ch0: 9 * 200 * 3 = 5400, ch1: 9 * (-300) * 2 = -5400 */
@@ -289,7 +290,7 @@ static void test_fc_int16(void)
     /* Weights [2][3]: row0=[1,2,3], row1=[-1,1,-1] */
     int16_t weights[6] = {1, 2, 3, -1, 1, -1};
 
-    int32_t acc[2] = {0};
+    int64_t acc[2] = {0};
     npu_fc(&cfg, &input, (const int8_t *)weights, NULL, acc);
 
     /* oc0: 1000*1 + (-500)*2 + 300*3 = 1000 - 1000 + 900 = 900 */
@@ -320,7 +321,7 @@ static void test_pooling_int16(void)
     input.data_i16[2] = 200;
     input.data_i16[3] = -100;
 
-    int32_t acc[1] = {0};
+    int64_t acc[1] = {0};
     npu_pooling(&cfg, &input, acc);
 
     ASSERT_EQ(acc[0], 1000, "maxpool INT16");

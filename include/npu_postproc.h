@@ -30,10 +30,10 @@ int32_t npu_postproc_add(const layer_config_t *cfg, int32_t val_a, int32_t val_b
  * Full tensor post-processing (dispatches by PPU_MODE).
  * Handles CONV_REQ, RELU_ONLY, and PASSTHROUGH modes.
  *
- * acc: INT32 accumulator array [num_h * num_w * num_c] in NHWC order
+ * acc: INT64 accumulator array [num_h * num_w * num_c] in NHWC order
  */
 void npu_postprocess(const layer_config_t *cfg,
-                     const int32_t *acc,
+                     const int64_t *acc,
                      int num_h, int num_w, int num_c,
                      tensor_t *output);
 

@@ -8,11 +8,11 @@
  */
 
 #include "npu_operators.h"
-#include <limits.h>
+#include <stdint.h>
 
 void npu_pooling(const layer_config_t *cfg,
                  const tensor_t *input,
-                 int32_t *output_acc)
+                 int64_t *output_acc)
 {
     const int in_h  = cfg->in_h;
     const int in_w  = cfg->in_w;
@@ -42,13 +42,13 @@ void npu_pooling(const layer_config_t *cfg,
     for (int oh = 0; oh < out_h; oh++) {
         for (int ow = 0; ow < out_w; ow++) {
             for (int c = 0; c < ch; c++) {
-                int32_t result;
+                int64_t result;
                 int count = 0;
 
                 if (is_avg) {
                     result = 0;
                 } else {
-                    result = INT32_MIN;
+                    result = INT64_MIN;
                 }
 
                 for (int ph = 0; ph < pool_h; ph++) {
@@ -59,11 +59,11 @@ void npu_pooling(const layer_config_t *cfg,
                         int iw = ow * pool_sw - pad_l + pw;
                         if (iw < 0 || iw >= in_w) continue;
 
-                        int32_t val;
+                        int64_t val;
                         if (is_int16) {
-                            val = (int32_t)tensor_get_i16(input, ih, iw, c);
+                            val = (int64_t)tensor_get_i16(input, ih, iw, c);
                         } else {
-                            val = (int32_t)tensor_get_i8(input, ih, iw, c);
+                            val = (int64_t)tensor_get_i8(input, ih, iw, c);
                         }
 
                         if (is_avg) {

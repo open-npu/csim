@@ -254,7 +254,7 @@ static void test_full_tensor(void)
     cfg.ch_params = params;
 
     /* Input: [50, 100] as NHWC 1×1×2 */
-    int32_t acc[2] = {50, 100};
+    int64_t acc[2] = {50, 100};
     tensor_t output = tensor_alloc_i8(1, 1, 2);
 
     npu_postprocess(&cfg, acc, 1, 1, 2, &output);
