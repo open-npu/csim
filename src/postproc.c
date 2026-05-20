@@ -1,104 +1,184 @@
 /*
  * Open-NPU C Functional Simulator
- * postproc.c — Post-processing pipeline (bit-exact)
+ * postproc.c — Per-channel requantize post-processing pipeline (bit-exact)
  *
- * Pipeline order (matches hardware):
- *   INT32 acc → +Bias → >>Shift → ×Scale → +OutZP → Clamp → LUT → Output
+ * Hardware pipeline order (matches CSR spec / PPU microarchitecture):
+ *   acc(40b) → +bias_q[ch] → ×M[ch] → >>S[ch](+round) → +zp[ch] → clamp → ReLU/LUT → out
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "npu_postproc.h"
 
-/* Saturate INT32 to INT8 range */
-static inline int8_t sat_i8(int32_t val) {
-    if (val > 127) return 127;
-    if (val < -128) return -128;
-    return (int8_t)val;
-}
-
-/* Saturate INT32 to INT16 range */
-static inline int16_t sat_i16(int32_t val) {
-    if (val > 32767) return 32767;
-    if (val < -32768) return -32768;
-    return (int16_t)val;
-}
-
-int32_t npu_postproc_single(const layer_config_t *cfg,
-                            int32_t acc,
-                            int32_t bias_val,
-                            int oc)
+/* ─── Internal: apply activation function ─── */
+static inline int32_t apply_activation(const layer_config_t *cfg, int32_t val)
 {
-    (void)oc; /* oc reserved for per-channel params in future */
-
-    /* Step 1: Add bias */
-    if (cfg->post_ctrl & POST_BIAS_EN) {
-        int32_t shifted_bias = bias_val >> cfg->bias_shift;
-        acc += shifted_bias;
+    if (cfg->post_ctrl & POST_RELU_EN) {
+        if (val < 0) val = 0;
+    } else if (cfg->post_ctrl & POST_RELU6_EN) {
+        if (val < 0) val = 0;
+        /* ReLU6: clamp to 6*scale — in quantized domain this is just clamp_max */
     }
 
-    /* Step 2: Right shift (requantization) */
-    if (cfg->post_ctrl & POST_SHIFT_EN) {
-        if (cfg->round_en && cfg->shift_bits > 0) {
-            /* Rounding: add 0.5 ULP before shift */
-            acc += (1 << (cfg->shift_bits - 1));
-        }
-        acc >>= cfg->shift_bits;
-    }
-
-    /* Step 3: Multiply by scale */
-    if (cfg->post_ctrl & POST_SCALE_EN) {
-        /* scale is a 16-bit multiplier; result is (acc * scale) >> 15 */
-        int64_t tmp = (int64_t)acc * (int64_t)cfg->scale;
-        acc = (int32_t)(tmp >> 15);
-    }
-
-    /* Step 4: Add output zero point */
-    acc += (int32_t)cfg->out_zp;
-
-    /* Step 5: Clamp */
-    if (cfg->post_ctrl & POST_CLAMP_EN) {
-        if (acc < (int32_t)cfg->clamp_min) acc = (int32_t)cfg->clamp_min;
-        if (acc > (int32_t)cfg->clamp_max) acc = (int32_t)cfg->clamp_max;
-    }
-
-    /* Step 6: LUT activation */
     if (cfg->post_ctrl & POST_LUT_EN) {
-        /* Map to unsigned index: signed INT8 [-128..127] → unsigned [0..255] */
-        uint8_t idx = (uint8_t)(int8_t)acc + 128;
-        if (cfg->data_type == DTYPE_INT8) {
-            acc = (int32_t)cfg->lut_i8[idx];
+        /* Map value to unsigned 8-bit index */
+        uint8_t idx;
+        if (cfg->post_ctrl & POST_INT16_OUT) {
+            /* INT16: apply LUT_INPUT_SHIFT to map to 0-255 range */
+            idx = (uint8_t)((val + 128) & 0xFF);
+            val = (int32_t)cfg->lut_i16[idx];
         } else {
-            acc = (int32_t)cfg->lut_i16[idx];
+            idx = (uint8_t)((int8_t)val + 128);
+            val = (int32_t)cfg->lut_i8[idx];
         }
     }
 
-    return acc;
+    return val;
 }
 
+/* ─── CONV_REQ mode: per-channel requantize ─── */
+int32_t npu_postproc_perchannel(const layer_config_t *cfg, int64_t acc, int ch)
+{
+    const perchannel_param_t *p = &cfg->ch_params[ch];
+
+    /* Stage 1: Add bias */
+    if (cfg->post_ctrl & POST_BIAS_EN) {
+        acc += (int64_t)p->bias_q;
+    }
+
+    /* Stage 2: Multiply by M (15-bit unsigned) */
+    int64_t product = acc * (int64_t)(p->M & 0x7FFF);
+
+    /* Stage 3: Rounding right shift by S (6-bit, 0~63) */
+    uint8_t shift = p->S & 0x3F;
+    int64_t result;
+    if (shift > 0) {
+        result = (product + ((int64_t)1 << (shift - 1))) >> shift;
+    } else {
+        result = product;
+    }
+
+    /* Stage 4: Add zero point */
+    if (cfg->post_ctrl & POST_ZP_EN) {
+        result += (int64_t)p->zp;
+    }
+
+    /* Stage 5: Clamp */
+    if (result < (int64_t)cfg->clamp_min) result = (int64_t)cfg->clamp_min;
+    if (result > (int64_t)cfg->clamp_max) result = (int64_t)cfg->clamp_max;
+
+    /* Stage 6: Activation */
+    return apply_activation(cfg, (int32_t)result);
+}
+
+/* ─── ADD mode: dual rescale + sum ─── */
+int32_t npu_postproc_add(const layer_config_t *cfg, int32_t val_a, int32_t val_b)
+{
+    const add_param_t *p = cfg->add_params;
+
+    /* Rescale branch A: val_a × M_A >> S_A */
+    int64_t prod_a = (int64_t)val_a * (int64_t)(p->M_A & 0x7FFF);
+    uint8_t shift_a = p->S_A & 0x3F;
+    int32_t rescaled_a;
+    if (shift_a > 0) {
+        rescaled_a = (int32_t)((prod_a + ((int64_t)1 << (shift_a - 1))) >> shift_a);
+    } else {
+        rescaled_a = (int32_t)prod_a;
+    }
+
+    /* Rescale branch B: val_b × M_B >> S_B */
+    int64_t prod_b = (int64_t)val_b * (int64_t)(p->M_B & 0x7FFF);
+    uint8_t shift_b = p->S_B & 0x3F;
+    int32_t rescaled_b;
+    if (shift_b > 0) {
+        rescaled_b = (int32_t)((prod_b + ((int64_t)1 << (shift_b - 1))) >> shift_b);
+    } else {
+        rescaled_b = (int32_t)prod_b;
+    }
+
+    /* Sum */
+    int64_t sum = (int64_t)rescaled_a + (int64_t)rescaled_b;
+
+    /* Clamp */
+    if (sum < (int64_t)cfg->clamp_min) sum = (int64_t)cfg->clamp_min;
+    if (sum > (int64_t)cfg->clamp_max) sum = (int64_t)cfg->clamp_max;
+
+    /* Activation */
+    return apply_activation(cfg, (int32_t)sum);
+}
+
+/* ─── Full tensor post-processing (CONV_REQ / RELU_ONLY / PASSTHROUGH) ─── */
 void npu_postprocess(const layer_config_t *cfg,
                      const int32_t *acc,
-                     const int32_t *bias,
                      int num_h, int num_w, int num_c,
                      tensor_t *output)
 {
-    int total = num_h * num_w * num_c;
-    (void)total;
+    uint8_t ppu_mode = cfg->post_ctrl & POST_PPU_MODE_MASK;
 
     for (int h = 0; h < num_h; h++) {
         for (int w = 0; w < num_w; w++) {
             for (int c = 0; c < num_c; c++) {
                 int idx = h * num_w * num_c + w * num_c + c;
-                int32_t val = acc[idx];
-                int32_t bias_val = bias ? bias[c] : 0;
+                int32_t out_val;
 
-                val = npu_postproc_single(cfg, val, bias_val, c);
+                switch (ppu_mode) {
+                case PPU_MODE_CONV_REQ:
+                    out_val = npu_postproc_perchannel(cfg, (int64_t)acc[idx], c);
+                    break;
+
+                case PPU_MODE_RELU_ONLY: {
+                    int32_t val = acc[idx];
+                    if (val < (int32_t)cfg->clamp_min) val = (int32_t)cfg->clamp_min;
+                    if (val > (int32_t)cfg->clamp_max) val = (int32_t)cfg->clamp_max;
+                    out_val = apply_activation(cfg, val);
+                    break;
+                }
+
+                case PPU_MODE_PASSTHROUGH:
+                default:
+                    out_val = acc[idx];
+                    break;
+                }
 
                 /* Write output */
-                if (cfg->post_ctrl & POST_OUT_INT16) {
-                    tensor_set_i16(output, h, w, c, sat_i16(val));
+                if (cfg->post_ctrl & POST_INT16_OUT) {
+                    tensor_set_i16(output, h, w, c, (int16_t)out_val);
                 } else {
-                    tensor_set_i8(output, h, w, c, sat_i8(val));
+                    tensor_set_i8(output, h, w, c, (int8_t)out_val);
+                }
+            }
+        }
+    }
+}
+
+/* ─── Add mode full tensor post-processing ─── */
+void npu_postprocess_add(const layer_config_t *cfg,
+                         const tensor_t *input_a,
+                         const tensor_t *input_b,
+                         int num_h, int num_w, int num_c,
+                         tensor_t *output)
+{
+    int is_int16 = (cfg->data_type == DTYPE_INT16);
+
+    for (int h = 0; h < num_h; h++) {
+        for (int w = 0; w < num_w; w++) {
+            for (int c = 0; c < num_c; c++) {
+                int32_t val_a, val_b;
+
+                if (is_int16) {
+                    val_a = (int32_t)tensor_get_i16(input_a, h, w, c);
+                    val_b = (int32_t)tensor_get_i16(input_b, h, w, c);
+                } else {
+                    val_a = (int32_t)tensor_get_i8(input_a, h, w, c);
+                    val_b = (int32_t)tensor_get_i8(input_b, h, w, c);
+                }
+
+                int32_t out_val = npu_postproc_add(cfg, val_a, val_b);
+
+                if (cfg->post_ctrl & POST_INT16_OUT) {
+                    tensor_set_i16(output, h, w, c, (int16_t)out_val);
+                } else {
+                    tensor_set_i8(output, h, w, c, (int8_t)out_val);
                 }
             }
         }

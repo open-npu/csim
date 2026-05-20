@@ -30,15 +30,38 @@ enum {
     DTYPE_INT16 = 1
 };
 
-/* ─── Post-processing control bits (matches CSR POST_CTRL) ─── */
-#define POST_BIAS_EN     (1 << 0)
-#define POST_SHIFT_EN    (1 << 1)
-#define POST_SCALE_EN    (1 << 2)
-#define POST_CLAMP_EN    (1 << 3)
+/* ─── POST_CTRL bits (matches CSR 0x180 POST_CTRL) ─── */
+#define POST_PPU_MODE_MASK   0x03   /* bit[1:0] */
+#define PPU_MODE_CONV_REQ    0      /* requantize after conv/dw/fc */
+#define PPU_MODE_ADD         1      /* eltwise add with dual rescale */
+#define PPU_MODE_RELU_ONLY   2      /* only activation, no requant */
+#define PPU_MODE_PASSTHROUGH 3      /* bypass PPU */
+
+#define POST_RELU_EN     (1 << 2)
+#define POST_RELU6_EN    (1 << 3)
 #define POST_LUT_EN      (1 << 4)
-#define POST_ELTWISE_EN  (1 << 5)
-#define POST_POOL_EN     (1 << 6)
-#define POST_OUT_INT16   (1 << 7)
+#define POST_ZP_EN       (1 << 5)
+#define POST_BIAS_EN     (1 << 6)
+#define POST_INT16_OUT   (1 << 7)
+
+/* ─── Per-channel requantize parameters (10 bytes/channel, packed) ─── */
+typedef struct {
+    uint16_t M;          /* [14:0] 15-bit unsigned multiplier, bit15=0 */
+    uint8_t  S;          /* [5:0]  6-bit shift amount */
+    uint8_t  _reserved0;
+    int16_t  zp;         /* [15:0] 16-bit signed output zero point */
+    int32_t  bias_q;     /* [31:0] 32-bit signed quantized bias */
+} __attribute__((packed)) perchannel_param_t;
+
+/* ─── Add node rescale parameters (8 bytes total) ─── */
+typedef struct {
+    uint16_t M_A;        /* [14:0] branch A multiplier */
+    uint8_t  S_A;        /* [5:0]  branch A shift */
+    uint8_t  _reserved0;
+    uint16_t M_B;        /* [14:0] branch B multiplier */
+    uint8_t  S_B;        /* [5:0]  branch B shift */
+    uint8_t  _reserved1;
+} __attribute__((packed)) add_param_t;
 
 /* ─── Tensor (NHWC layout in memory) ─── */
 typedef struct {
@@ -84,17 +107,17 @@ typedef struct {
     uint16_t tile_h, tile_w;
     uint16_t tile_num_h, tile_num_w;
 
-    /* Post-processing */
-    uint8_t  post_ctrl;         /* bitmask of POST_xxx_EN */
-    uint8_t  shift_bits;        /* 0-31 */
-    uint8_t  round_en;          /* 1=rounding shift */
-    int16_t  scale;             /* quantization scale (Q0.15 or multiplier) */
-    int8_t   in_zp;             /* input zero point */
-    int8_t   weight_zp;         /* weight zero point */
-    int8_t   out_zp;            /* output zero point */
-    int8_t   clamp_min;
-    int8_t   clamp_max;
-    uint8_t  bias_shift;        /* bias right-shift */
+    /* Post-processing (per-channel requantize architecture) */
+    uint8_t  post_ctrl;         /* PPU_MODE[1:0] + enable bits */
+    int16_t  clamp_min;         /* 16-bit signed min (INT8: -128, INT16: -32768) */
+    int16_t  clamp_max;         /* 16-bit signed max (INT8: 127, INT16: 32767) */
+    int8_t   in_zp;             /* input zero point (for padding fill value) */
+
+    /* Per-channel params (pointer, not serialized in fixed config) */
+    perchannel_param_t *ch_params;   /* [out_c], NULL if PASSTHROUGH */
+
+    /* Add node params (only valid when PPU_MODE_ADD) */
+    add_param_t *add_params;         /* single instance or NULL */
 
     /* LUT (256 entries) */
     int8_t   lut_i8[256];

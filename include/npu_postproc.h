@@ -2,6 +2,9 @@
  * Open-NPU C Functional Simulator
  * npu_postproc.h — Post-processing pipeline declarations
  *
+ * Hardware pipeline (per CSR spec):
+ *   acc(40b) → +bias_q[ch] → ×M[ch] → >>S[ch](+round) → +zp[ch] → clamp → ReLU/LUT → out
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -11,33 +14,37 @@
 #include "npu_types.h"
 
 /*
- * Apply the full post-processing pipeline to an array of INT32 accumulator
- * values, producing the final INT8 (or INT16) output tensor.
+ * Per-channel post-processing (CONV_REQ mode).
+ * Processes a single accumulator value for output channel `ch`.
+ * Returns the final quantized output value.
+ */
+int32_t npu_postproc_perchannel(const layer_config_t *cfg, int64_t acc, int ch);
+
+/*
+ * Add mode post-processing for a single element.
+ * Rescales two inputs with independent M/S, sums, then applies clamp+activation.
+ */
+int32_t npu_postproc_add(const layer_config_t *cfg, int32_t val_a, int32_t val_b);
+
+/*
+ * Full tensor post-processing (dispatches by PPU_MODE).
+ * Handles CONV_REQ, RELU_ONLY, and PASSTHROUGH modes.
  *
- * Pipeline order (fixed, each step gated by post_ctrl bits):
- *   ACC(INT32) → +Bias → >>Shift → ×Scale → +OutZP → Clamp → LUT → Output
- *
- * Parameters:
- *   cfg        - layer configuration (post_ctrl, shift, scale, etc.)
- *   acc        - input accumulator array [num_elements], per-channel indexed
- *   bias       - bias array [out_c] (INT32), NULL if no bias
- *   num_h      - output height
- *   num_w      - output width
- *   num_c      - output channels
- *   output     - output tensor (pre-allocated, NHWC)
+ * acc: INT32 accumulator array [num_h * num_w * num_c] in NHWC order
  */
 void npu_postprocess(const layer_config_t *cfg,
                      const int32_t *acc,
-                     const int32_t *bias,
                      int num_h, int num_w, int num_c,
                      tensor_t *output);
 
 /*
- * Apply post-processing to a single value (used internally and for testing).
+ * Add mode full tensor post-processing.
+ * Reads from two input tensors, applies dual rescale + sum + activation.
  */
-int32_t npu_postproc_single(const layer_config_t *cfg,
-                            int32_t acc,
-                            int32_t bias_val,
-                            int oc);
+void npu_postprocess_add(const layer_config_t *cfg,
+                         const tensor_t *input_a,
+                         const tensor_t *input_b,
+                         int num_h, int num_w, int num_c,
+                         tensor_t *output);
 
 #endif /* NPU_POSTPROC_H */
