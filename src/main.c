@@ -244,7 +244,11 @@ static int execute_layer(const layer_config_t *cfg,
 
     /* Concat: direct copy, no accumulator */
     if (cfg->op_type == OP_CONCAT) {
-        npu_concat(cfg, input, output);
+        /* For concat, input source is determined by residual_src:
+         * residual_src >= 0: read from that layer's output (input_b)
+         * residual_src < 0:  read from current input */
+        tensor_t *src = (cfg->residual_src >= 0 && input_b) ? input_b : input;
+        npu_concat(cfg, src, output);
         return 0;
     }
 
@@ -374,7 +378,14 @@ int main(int argc, char *argv[])
 
         /* Allocate output */
         tensor_t output;
-        if (cfg->post_ctrl & POST_INT16_OUT) {
+        if (cfg->op_type == OP_CONCAT && i > 0 &&
+            layers[i-1].op_type == OP_CONCAT &&
+            layers[i-1].out_h == cfg->out_h &&
+            layers[i-1].out_w == cfg->out_w &&
+            layers[i-1].out_c == cfg->out_c) {
+            /* Reuse previous Concat sub-layer's output buffer */
+            output = layer_outputs[i-1];
+        } else if (cfg->post_ctrl & POST_INT16_OUT) {
             output = tensor_alloc_i16(cfg->out_h, cfg->out_w, cfg->out_c);
         } else {
             output = tensor_alloc_i8(cfg->out_h, cfg->out_w, cfg->out_c);
@@ -404,9 +415,10 @@ int main(int argc, char *argv[])
             weight_ptr += weight_bytes;
         }
 
-        /* Resolve residual input for Add nodes */
+        /* Resolve residual input for Add and Concat nodes */
         tensor_t *input_b = NULL;
-        if (cfg->op_type == OP_ELTWISE_ADD && cfg->residual_src >= 0) {
+        if ((cfg->op_type == OP_ELTWISE_ADD || cfg->op_type == OP_CONCAT)
+            && cfg->residual_src >= 0) {
             input_b = &layer_outputs[(int)cfg->residual_src];
         }
 
@@ -481,6 +493,13 @@ int main(int argc, char *argv[])
     free(output_nchw);
     tensor_free(&input_tensor);
     for (uint32_t i = 0; i < header.num_layers; i++) {
+        /* Skip duplicate Concat buffers (shared with next sub-layer) */
+        if (i + 1 < header.num_layers &&
+            layers[i].op_type == OP_CONCAT &&
+            layers[i+1].op_type == OP_CONCAT &&
+            layer_outputs[i].data == layer_outputs[i+1].data) {
+            continue;  /* will be freed when we reach the last sub-layer */
+        }
         tensor_free(&layer_outputs[i]);
     }
     free(layer_outputs);
