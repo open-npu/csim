@@ -1,8 +1,14 @@
 # Open-NPU C Functional Simulator — Makefile
 # SPDX-License-Identifier: Apache-2.0
+#
+# Usage:
+#   make                          # Default config (16×16, 128KB, INT8+INT16)
+#   make CFLAGS_HW="-DNPU_ARRAY_SIZE=4 -DNPU_SPAD_SIZE_KB=32 -DNPU_HAS_INT16=0"
+#
+# Any NPU_* define in npu_config.h can be overridden via CFLAGS_HW.
 
 CC      = gcc
-CFLAGS  = -std=c99 -Wall -Wextra -O2 -Iinclude
+CFLAGS  = -std=c99 -Wall -Wextra -O2 -Iinclude $(CFLAGS_HW)
 LDFLAGS = -lm
 
 SRCDIR  = src
