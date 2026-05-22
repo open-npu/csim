@@ -55,4 +55,23 @@ void dma_store_tile(const layer_config_t *cfg,
                     int tile_row, int tile_col,
                     tensor_t *output);
 
+/*
+ * Store a computed tile back into the full output tensor (with OC offset).
+ *
+ * Like dma_store_tile but writes only a subset of output channels.
+ * tile_result has tile_oc channels which map to output channels
+ * [oc_offset .. oc_offset+tile_oc-1].
+ *
+ * tile_row, tile_col: spatial tile index
+ * oc_offset: first output channel index for this tile
+ * cfg: layer config (tile_h, tile_w define spatial tile size)
+ * tile_result: [tile_out_h][tile_out_w][tile_oc] NHWC
+ * output: full output tensor [out_h][out_w][out_c]
+ */
+void dma_store_tile_oc(const layer_config_t *cfg,
+                       const tensor_t *tile_result,
+                       int tile_row, int tile_col,
+                       int oc_offset,
+                       tensor_t *output);
+
 #endif /* NPU_DMA_H */

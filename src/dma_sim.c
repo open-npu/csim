@@ -71,34 +71,28 @@ void dma_extract_tile(const layer_config_t *cfg,
                       int tile_row, int tile_col,
                       tensor_t *tile_out)
 {
-    const int tile_h = cfg->tile_h;
-    const int tile_w = cfg->tile_w;
+    const int tile_h = cfg->tile_h;   /* output-space tile height (full, not border-clipped) */
+    const int tile_w = cfg->tile_w;   /* output-space tile width  (full, not border-clipped) */
     const int ch     = cfg->in_c;
     const int in_h   = cfg->in_h;
     const int in_w   = cfg->in_w;
+    const int sh     = cfg->stride_h ? cfg->stride_h : 1;
+    const int sw     = cfg->stride_w ? cfg->stride_w : 1;
 
-    /* Compute the halo needed for convolution */
-    int halo_top    = cfg->pad_top;
-    int halo_left   = cfg->pad_left;
-    int halo_bottom = (cfg->kernel_h - 1) * cfg->dilation_h - cfg->pad_top;
-    int halo_right  = (cfg->kernel_w - 1) * cfg->dilation_w - cfg->pad_left;
+    /* Start position uses original tile_h for correct tile spacing */
+    int start_h = tile_row * tile_h * sh - (int)cfg->pad_top;
+    int start_w = tile_col * tile_w * sw - (int)cfg->pad_left;
 
-    /* Tile input region in the original input space (before padding) */
-    int start_h = tile_row * tile_h - halo_top;
-    int start_w = tile_col * tile_w - halo_left;
-
-    /* Tile output dimensions include halo */
-    int out_tile_h = tile_h + halo_top + halo_bottom;
-    int out_tile_w = tile_w + halo_left + halo_right;
-
-    /* Ensure tile_out is properly sized */
-    /* tile_out should be allocated as [out_tile_h][out_tile_w][ch] */
+    /* Copy extent comes from the pre-allocated tile_out buffer size,
+     * which accounts for border clipping (actual_out_h * stride + halo) */
+    int in_tile_h = tile_out->h;
+    int in_tile_w = tile_out->w;
 
     const int is_int16 = (cfg->data_type == DTYPE_INT16);
 
-    for (int th = 0; th < out_tile_h; th++) {
+    for (int th = 0; th < in_tile_h; th++) {
         int src_h = start_h + th;
-        for (int tw = 0; tw < out_tile_w; tw++) {
+        for (int tw = 0; tw < in_tile_w; tw++) {
             int src_w = start_w + tw;
             for (int tc = 0; tc < ch; tc++) {
                 if (is_int16) {
@@ -153,6 +147,44 @@ void dma_store_tile(const layer_config_t *cfg,
                 } else {
                     int8_t val = tensor_get_i8(tile_result, th, tw, tc);
                     tensor_set_i8(output, start_h + th, start_w + tw, tc, val);
+                }
+            }
+        }
+    }
+}
+
+void dma_store_tile_oc(const layer_config_t *cfg,
+                       const tensor_t *tile_result,
+                       int tile_row, int tile_col,
+                       int oc_offset,
+                       tensor_t *output)
+{
+    const int tile_h = cfg->tile_h;
+    const int tile_w = cfg->tile_w;
+    const int out_h  = cfg->out_h;
+    const int out_w  = cfg->out_w;
+    const int tile_oc = tile_result->c;  /* number of channels in this tile */
+
+    /* Compute spatial bounds (may be smaller for border tiles) */
+    int start_h = tile_row * tile_h;
+    int start_w = tile_col * tile_w;
+    int actual_h = tile_h;
+    int actual_w = tile_w;
+    if (start_h + actual_h > out_h) actual_h = out_h - start_h;
+    if (start_w + actual_w > out_w) actual_w = out_w - start_w;
+
+    const int is_int16 = (cfg->data_type == DTYPE_INT16);
+
+    for (int th = 0; th < actual_h; th++) {
+        for (int tw = 0; tw < actual_w; tw++) {
+            for (int tc = 0; tc < tile_oc; tc++) {
+                int dst_c = oc_offset + tc;
+                if (is_int16) {
+                    int16_t val = tensor_get_i16(tile_result, th, tw, tc);
+                    tensor_set_i16(output, start_h + th, start_w + tw, dst_c, val);
+                } else {
+                    int8_t val = tensor_get_i8(tile_result, th, tw, tc);
+                    tensor_set_i8(output, start_h + th, start_w + tw, dst_c, val);
                 }
             }
         }

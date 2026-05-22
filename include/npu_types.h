@@ -44,6 +44,12 @@ enum {
 #define POST_BIAS_EN     (1 << 6)
 #define POST_INT16_OUT   (1 << 7)
 
+/* ─── SCHED_CTRL bits (model descriptor scheduling, NOT HW DMA_CTRL CSR) ─── */
+#define SCHED_CTRL_DB_EN       (1 << 0)   /* bit[0]: double-buffer enable (ping-pong) */
+#define SCHED_CTRL_FUSE_START  (1 << 1)   /* bit[1]: first layer of fused block */
+#define SCHED_CTRL_FUSE_MID    (1 << 2)   /* bit[2]: middle layer of fused block */
+#define SCHED_CTRL_FUSE_END    (1 << 3)   /* bit[3]: last layer of fused block */
+
 /* ─── Per-channel requantize parameters (14 bytes/channel, packed) ─── */
 typedef struct {
     uint16_t M;          /* [14:0] 15-bit unsigned multiplier, bit15=0 */
@@ -109,6 +115,7 @@ typedef struct {
 
     /* Post-processing (per-channel requantize architecture) */
     uint8_t  post_ctrl;         /* PPU_MODE[1:0] + enable bits */
+    uint8_t  sched_ctrl;        /* SCHED_CTRL: bit[0]=DB_EN (double-buffer) */
     int16_t  clamp_min;         /* 16-bit signed min (INT8: -128, INT16: -32768) */
     int16_t  clamp_max;         /* 16-bit signed max (INT8: 127, INT16: 32767) */
     int8_t   in_zp;             /* input zero point (for padding fill value) */
@@ -121,6 +128,9 @@ typedef struct {
 
     /* Residual source layer index for Add (-1 = none) */
     int8_t   residual_src;
+
+    /* Input source layer index (-1 = previous layer) */
+    int16_t  input_src;
 
     /* LUT (256 entries) */
     int8_t   lut_i8[256];
