@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h>
 #include "npu_types.h"
 #include "npu_config.h"
 #include "npu_operators.h"
@@ -76,6 +77,45 @@ typedef struct {
 
 _Static_assert(sizeof(fixed_config_t) == 62, "fixed_config_t must be 62 bytes");
 
+/* Diagnostic: verify field offsets with offsetof() */
+#define CHECK_OFFSET(field, expected) \
+    if (offsetof(fixed_config_t, field) != (expected)) { \
+        fprintf(stderr, "LAYOUT BUG: " #field " at %zu, expected %d\n", \
+                offsetof(fixed_config_t, field), (expected)); \
+    }
+
+static void check_fixed_config_layout(void) {
+    CHECK_OFFSET(op_type,        0);
+    CHECK_OFFSET(data_type,      1);
+    CHECK_OFFSET(in_h,           2);
+    CHECK_OFFSET(in_c,           6);
+    CHECK_OFFSET(out_h,          8);
+    CHECK_OFFSET(out_c,         12);
+    CHECK_OFFSET(kernel_h,      14);
+    CHECK_OFFSET(kernel_w,      15);
+    CHECK_OFFSET(dilation_h,    16);
+    CHECK_OFFSET(dilation_w,    17);
+    CHECK_OFFSET(stride_h,      18);
+    CHECK_OFFSET(stride_w,      19);
+    CHECK_OFFSET(pad_top,       20);
+    CHECK_OFFSET(pool_mode,     24);
+    CHECK_OFFSET(resize_mode,   30);
+    CHECK_OFFSET(concat_offset, 35);
+    CHECK_OFFSET(tile_h,        39);
+    CHECK_OFFSET(post_ctrl,     47);
+    CHECK_OFFSET(sched_ctrl,    48);
+    CHECK_OFFSET(clamp_min,     49);
+    CHECK_OFFSET(clamp_max,     51);
+    CHECK_OFFSET(in_zp,         53);
+    CHECK_OFFSET(_pad1,         54);
+    CHECK_OFFSET(param_ch_count,55);
+    CHECK_OFFSET(has_lut,       57);
+    CHECK_OFFSET(has_add,       58);
+    CHECK_OFFSET(residual_src,  59);
+    CHECK_OFFSET(input_src,     60);
+}
+#undef CHECK_OFFSET
+
 /* ─── Load model from file ─── */
 
 static int load_model(const char *path,
@@ -120,6 +160,47 @@ static int load_model(const char *path,
         layer_config_t *cfg = &layers[i];
         cfg->op_type     = fc.op_type;
         cfg->data_type   = fc.data_type;
+
+        /* Diagnostic: print first layer deserialized fields */
+        if (i == 0 && getenv("DUMP_LAYERS")) {
+            fprintf(stderr, "[CSIM DIAG] Layer 0 raw bytes (first 62):");
+            uint8_t raw[62];
+            memcpy(raw, &fc, sizeof(fc));
+            for (int j = 0; j < 62; j++) {
+                if (j % 16 == 0) fprintf(stderr, "\n  %02d: ", j);
+                fprintf(stderr, "%02x ", raw[j]);
+            }
+            fprintf(stderr, "\n");
+            fprintf(stderr, "[CSIM DIAG] Layer 0 decoded: op=%d dtype=%d in=%dx%dx%d "
+                    "out=%dx%dx%d kh=%d kw=%d sh=%d sw=%d "
+                    "pad=[%d,%d,%d,%d] clamp=[%d,%d] in_zp=%d "
+                    "post_ctrl=0x%02x param_ch_count=%d has_lut=%d has_add=%d "
+                    "residual_src=%d input_src=%d\n",
+                    fc.op_type, fc.data_type,
+                    fc.in_h, fc.in_w, fc.in_c, fc.out_h, fc.out_w, fc.out_c,
+                    fc.kernel_h, fc.kernel_w, fc.stride_h, fc.stride_w,
+                    fc.pad_top, fc.pad_bottom, fc.pad_left, fc.pad_right,
+                    fc.clamp_min, fc.clamp_max, fc.in_zp,
+                    fc.post_ctrl, fc.param_ch_count, fc.has_lut, fc.has_add,
+                    fc.residual_src, fc.input_src);
+            if (fc.param_ch_count > 0 && fc.param_ch_count <= 4) {
+                /* Peek at first few per-ch params */
+                long cur = ftell(f);
+                perchannel_param_t peek[4];
+                if (fread(peek, sizeof(perchannel_param_t), fc.param_ch_count, f)
+                    == fc.param_ch_count) {
+                    fprintf(stderr, "[CSIM DIAG] First %d per-ch params:\n",
+                            (int)fc.param_ch_count);
+                    for (uint32_t k = 0; k < fc.param_ch_count; k++) {
+                        fprintf(stderr, "  ch[%u]: M=0x%04x S=%u zp=%d bias=%ld\n",
+                                k, peek[k].M, peek[k].S, peek[k].zp,
+                                (long)peek[k].bias_q);
+                    }
+                }
+                fseek(f, cur, SEEK_SET);
+                /* Re-read properly after diagnostics */
+            }
+        }
         cfg->in_h        = fc.in_h;
         cfg->in_w        = fc.in_w;
         cfg->in_c        = fc.in_c;
@@ -881,6 +962,9 @@ int main(int argc, char *argv[])
     }
 
     printf("Model: %u layers, %u bytes weights\n", header.num_layers, header.weight_size);
+
+    /* ── Diagnostic: verify struct layout ── */
+    check_fixed_config_layout();
 
     /* ─── Load input ─── */
     FILE *f_input = fopen(input_path, "rb");

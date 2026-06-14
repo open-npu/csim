@@ -59,6 +59,15 @@ int32_t npu_postproc_perchannel(const layer_config_t *cfg, int64_t acc, int ch)
         result = product;
     }
 
+    /* Stage 3b: Intermediate 17-bit saturation (matches RTL PPU npu_ppu.v Stage 3)
+     * RTL saturates the 55-bit shifted result to 17-bit signed [-65536, +65535]
+     * before zp addition. This prevents large kernels (e.g. 7×7) from
+     * accumulating values that exceed the PPU's intermediate precision. */
+    if (result > 65535)
+        result = 65535;
+    else if (result < -65536)
+        result = -65536;
+
     /* Stage 4: Add zero point */
     if (cfg->post_ctrl & POST_ZP_EN) {
         result += (int64_t)p->zp;
