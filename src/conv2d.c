@@ -4,14 +4,22 @@
  *
  * Weight layout: [out_c][kernel_h][kernel_w][in_c]
  * Input layout:  NHWC [in_h][in_w][in_c]
- * Output:        INT32 accumulator array [out_h][out_w][out_c]
+ * Output:        40-bit accumulator array [out_h][out_w][out_c]
  *
- * Supports: INT8/INT16, dilation, stride, asymmetric padding
+ * RTL PE wraps accumulator at 40 bits on EVERY MAC cycle.
+ * CSIM must replicate this to achieve bit-exact results.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "npu_operators.h"
+
+/* RTL PE: acc_reg <= acc_reg + (act_in * weight_reg)
+ * acc_reg is 40-bit signed. Overflow wraps (no saturation).
+ * Sign-extend from bit 39: */
+static inline int64_t trunc40(int64_t v) {
+    return (int64_t)((uint64_t)v << 24 >> 24);
+}
 
 void npu_conv2d(const layer_config_t *cfg,
                 const tensor_t *input,
@@ -69,6 +77,7 @@ void npu_conv2d(const layer_config_t *cfg,
                                 int8_t w_val  = weights[w_offset + ic];
                                 acc += (int64_t)in_val * (int64_t)w_val;
                             }
+                            acc = trunc40(acc);
                         }
                     }
                 }

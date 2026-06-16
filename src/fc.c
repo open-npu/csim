@@ -5,12 +5,16 @@
  * Weight layout: [out_c][in_c]
  * Input layout:  NHWC with h=1, w=1, c=in_c
  *
- * Supports: INT8/INT16
+ * RTL PE wraps accumulator at 40 bits on EVERY MAC cycle.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "npu_operators.h"
+
+static inline int64_t trunc40(int64_t v) {
+    return (int64_t)((uint64_t)v << 24 >> 24);
+}
 
 void npu_fc(const layer_config_t *cfg,
             const tensor_t *input,
@@ -36,6 +40,7 @@ void npu_fc(const layer_config_t *cfg,
                 int8_t w_val  = weights[oc * in_c + ic];
                 acc += (int64_t)in_val * (int64_t)w_val;
             }
+            acc = trunc40(acc);
         }
 
         output_acc[oc] = acc;

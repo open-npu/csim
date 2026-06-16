@@ -10,6 +10,12 @@
 
 #include "npu_postproc.h"
 
+/* RTL PPU uses 40-bit signed data path at Stage 1 (bias addition).
+ * Simulate signed wrap at 40 bits: sign-extend from bit 39. */
+static inline void trunc_40bit(int64_t *v) {
+    *v = (int64_t)((uint64_t)*v << 24 >> 24);
+}
+
 /* ─── Internal: apply activation function ─── */
 static inline int32_t apply_activation(const layer_config_t *cfg, int32_t val)
 {
@@ -42,9 +48,11 @@ int32_t npu_postproc_perchannel(const layer_config_t *cfg, int64_t acc, int ch)
 {
     const perchannel_param_t *p = &cfg->ch_params[ch];
 
-    /* Stage 1: Add bias */
+    /* Stage 1: Add bias (RTL PPU wraps at 40-bit signed) */
     if (cfg->post_ctrl & POST_BIAS_EN) {
         acc += (int64_t)p->bias_q;
+        /* RTL: s1_biased = {ACC_WIDTH}{s1_biased}, ACC_WIDTH=40, signed wrap */
+        trunc_40bit((int64_t*)&acc);
     }
 
     /* Stage 2: Multiply by M (15-bit unsigned) */
