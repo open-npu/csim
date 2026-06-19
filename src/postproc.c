@@ -8,6 +8,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <stdio.h>
 #include "npu_postproc.h"
 
 /* RTL PPU uses 40-bit signed data path at Stage 1 (bias addition).
@@ -55,14 +56,21 @@ int32_t npu_postproc_perchannel(const layer_config_t *cfg, int64_t acc, int ch)
         trunc_40bit((int64_t*)&acc);
     }
 
-    /* Stage 2: Multiply by M (15-bit unsigned) */
+    /* Stage 2: Multiply by M (15-bit unsigned) — RTL product is 55-bit signed */
     int64_t product = acc * (int64_t)(p->M & 0x7FFF);
+    /* Truncate to 55-bit signed to match RTL PPU Stage 2 register width */
+    product = (int64_t)((uint64_t)product << 9 >> 9);
 
     /* Stage 3: Rounding right shift by S (6-bit, 0~63) */
     uint8_t shift = p->S & 0x3F;
     int64_t result;
     if (shift > 0) {
-        result = (product + ((int64_t)1 << (shift - 1))) >> shift;
+        /* RTL: rounding add also wraps at 55 bits. For S >= 55, rounding = 0.
+         * For S < 55: rounded_v = product + (1 << (S-1)) in 55-bit signed. */
+        int64_t rbit = (shift < 55) ? ((int64_t)1 << (shift - 1)) : 0;
+        int64_t rounded = product + rbit;
+        rounded = (int64_t)((uint64_t)rounded << 9 >> 9);  // 55-bit signed wrap
+        result = rounded >> shift;
     } else {
         result = product;
     }
@@ -86,7 +94,18 @@ int32_t npu_postproc_perchannel(const layer_config_t *cfg, int64_t acc, int ch)
     if (result > (int64_t)cfg->clamp_max) result = (int64_t)cfg->clamp_max;
 
     /* Stage 6: Activation */
-    return apply_activation(cfg, (int32_t)result);
+    int32_t out = apply_activation(cfg, (int32_t)result);
+    /* DEBUG: dump ALL postproc calls for channel 0 */
+    if (ch == 0 && getenv("DBG_POST")) {
+        static int _dbg = 0;
+        fprintf(stderr, "[CSIM_DBG] #%d acc_in=%ld M=%u S=%u zp=%d bias=%ld bias_en=%d prod=%ld out=%d\n",
+                _dbg++,
+                (long)acc, (unsigned)(p->M & 0x7FFF), (unsigned)(p->S & 0x3F),
+                (int)p->zp, (long)p->bias_q,
+                (cfg->post_ctrl & POST_BIAS_EN) ? 1 : 0,
+                (long)product, out);
+    }
+    return out;
 }
 
 /* ─── ADD mode: dual rescale + sum ─── */
@@ -132,6 +151,12 @@ void npu_postprocess(const layer_config_t *cfg,
                      tensor_t *output)
 {
     uint8_t ppu_mode = cfg->post_ctrl & POST_PPU_MODE_MASK;
+    /* DEBUG: print dimensions and first few values */
+    if (getenv("DBG_POST")) {
+        fprintf(stderr, "[CSIM_DBG_PP] num_h=%d num_w=%d num_c=%d ppu_mode=%d first_acc=%ld first_val=%d\n",
+                num_h, num_w, num_c, ppu_mode,
+                (long)(acc[0]), (int)(acc[0]));
+    }
 
     for (int h = 0; h < num_h; h++) {
         for (int w = 0; w < num_w; w++) {
