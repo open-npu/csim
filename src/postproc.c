@@ -56,20 +56,20 @@ int32_t npu_postproc_perchannel(const layer_config_t *cfg, int64_t acc, int ch)
         trunc_40bit((int64_t*)&acc);
     }
 
-    /* Stage 2: Multiply by M (15-bit unsigned) — RTL product is 55-bit signed */
+    /* Stage 2: Multiply by M (15-bit unsigned) — RTL product is 56-bit signed */
     int64_t product = acc * (int64_t)(p->M & 0x7FFF);
-    /* Truncate to 55-bit signed to match RTL PPU Stage 2 register width */
-    product = (int64_t)((uint64_t)product << 9 >> 9);
+    /* Truncate to 56-bit signed to match RTL PPU Stage 2 register width */
+    product = (int64_t)((uint64_t)product << 8 >> 8);
 
     /* Stage 3: Rounding right shift by S (6-bit, 0~63) */
     uint8_t shift = p->S & 0x3F;
     int64_t result;
     if (shift > 0) {
-        /* RTL: rounding add also wraps at 55 bits. For S >= 55, rounding = 0.
-         * For S < 55: rounded_v = product + (1 << (S-1)) in 55-bit signed. */
-        int64_t rbit = (shift < 55) ? ((int64_t)1 << (shift - 1)) : 0;
+        /* RTL: rounding add also wraps at 56 bits. For S >= 56, rounding = 0.
+         * For S < 56: rounded_v = product + (1 << (S-1)) in 56-bit signed. */
+        int64_t rbit = (shift < 56) ? ((int64_t)1 << (shift - 1)) : 0;
         int64_t rounded = product + rbit;
-        rounded = (int64_t)((uint64_t)rounded << 9 >> 9);  // 55-bit signed wrap
+        rounded = (int64_t)((uint64_t)rounded << 8 >> 8);  // 56-bit signed wrap
         result = rounded >> shift;
     } else {
         result = product;

@@ -13,7 +13,9 @@
 #include "npu_operators.h"
 
 static inline int64_t trunc40(int64_t v) {
-    return (int64_t)((uint64_t)v << 24 >> 24);
+    v = (int64_t)((uint64_t)v << 24 >> 24);  // extract bits [39:0]
+    v <<= 24; v >>= 24;                        // sign-extend bit 39
+    return v;
 }
 
 void npu_fc(const layer_config_t *cfg,
