@@ -12,9 +12,10 @@
 #include "npu_postproc.h"
 
 /* RTL PPU uses 40-bit signed data path at Stage 1 (bias addition).
- * Simulate signed wrap at 40 bits: sign-extend from bit 39. */
+ * Simulate signed wrap at 40 bits: extract bits [39:0] then sign-extend. */
 static inline void trunc_40bit(int64_t *v) {
     *v = (int64_t)((uint64_t)*v << 24 >> 24);
+    *v <<= 24; *v >>= 24;  // sign-extend bit 39
 }
 
 /* ─── Internal: apply activation function ─── */
