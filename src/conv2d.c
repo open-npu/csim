@@ -97,12 +97,23 @@ void npu_conv2d(const layer_config_t *cfg,
 
                     /* Accumulate into dot_buf (RTL dot_buf update) */
                     dot_buf = trunc40(dot_buf + pass_sum);
+                    if (getenv("DBG_ACC28_PASS") && oc == 12 && oh == 0 && ow == 0)
+                        fprintf(stderr, "[CSIM_PASS] pass=%d remain=%d pass_sum=%12ld dot_buf=%12ld\n",
+                                pass, remain, (long)pass_sum, (long)dot_buf);
                 }
 
                 output_acc[oh * out_w * out_c + ow * out_c + oc] = dot_buf;
 
                 if (getenv("DBG_ACC") && oc == 9 && oh == 0 && ow == 0)
                     fprintf(stderr, "[CSIM_ACC_TILE] pixel(0,0) ch9 acc=%ld\n", (long)dot_buf);
+                if (getenv("DBG_ACC28") && oc == 12 && oh == 0 && ow == 0)
+                    fprintf(stderr, "[CSIM_ACC28] pixel(0,0) chloc=%d oc=%d acc=%ld\n",
+                            (int)oc, (int)cfg->out_c, (long)dot_buf);
+                if (getenv("DBG_ACC28_PASS") && oc == 12 && oh == 0 && ow == 0) {
+                    for (int p = 0; p <= k_depth/NPU_ARRAY_SIZE; p++)
+                        fprintf(stderr, "  pass %d: pe[0]=%ld pe[8]=%ld pe[15]=%ld\n", p,
+                                (long)pe[0], (long)(p*NPU_ARRAY_SIZE+8<k_depth?pe[8]:0), (long)pe[(k_depth-1)%NPU_ARRAY_SIZE]);
+                }
             }
         }
     }
