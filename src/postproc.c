@@ -61,6 +61,7 @@ int32_t npu_postproc_perchannel(const layer_config_t *cfg, int64_t acc, int ch)
     int64_t product = acc * (int64_t)(p->M & 0x7FFF);
     /* Truncate to 56-bit signed to match RTL PPU Stage 2 register width */
     product = (int64_t)((uint64_t)product << 8 >> 8);
+    product <<= 8; product >>= 8;  // sign-extend bit 55
 
     /* Stage 3: Rounding right shift by S (6-bit, 0~63) */
     uint8_t shift = p->S & 0x3F;
@@ -70,7 +71,8 @@ int32_t npu_postproc_perchannel(const layer_config_t *cfg, int64_t acc, int ch)
          * For S < 56: rounded_v = product + (1 << (S-1)) in 56-bit signed. */
         int64_t rbit = (shift < 56) ? ((int64_t)1 << (shift - 1)) : 0;
         int64_t rounded = product + rbit;
-        rounded = (int64_t)((uint64_t)rounded << 8 >> 8);  // 56-bit signed wrap
+        rounded = (int64_t)((uint64_t)rounded << 8 >> 8);  // mask to 56-bit
+        rounded <<= 8; rounded >>= 8;                        // sign-extend bit 55
         result = rounded >> shift;
     } else {
         result = product;
