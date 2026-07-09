@@ -11,11 +11,19 @@
 #include <stdio.h>
 #include "npu_postproc.h"
 
-/* RTL PPU uses 40-bit signed data path at Stage 1 (bias addition).
- * Simulate signed wrap at 40 bits: extract bits [39:0] then sign-extend. */
+/* RTL PPU uses configurable ACC_WIDTH signed data path at Stage 1 (bias addition).
+ * Simulate signed wrap: extract bits [ACC_WIDTH-1:0] then sign-extend.
+ * ACC_WIDTH read from env var (default 40, set 44 for ResNet18). */
+static int get_acc_width(void) {
+    const char *env = getenv("ACC_WIDTH");
+    return env ? atoi(env) : 40;
+}
+
 static inline void trunc_40bit(int64_t *v) {
-    *v = (int64_t)((uint64_t)*v << 24 >> 24);
-    *v <<= 24; *v >>= 24;  // sign-extend bit 39
+    int w = get_acc_width();
+    int shift = 64 - w;
+    *v = (int64_t)((uint64_t)*v << shift >> shift);
+    *v <<= shift; *v >>= shift;  // sign-extend bit w-1
 }
 
 /* ─── Internal: apply activation function ─── */
@@ -99,7 +107,7 @@ int32_t npu_postproc_perchannel(const layer_config_t *cfg, int64_t acc, int ch)
     /* Stage 6: Activation */
     int32_t out = apply_activation(cfg, (int32_t)result);
     /* DEBUG: dump ALL postproc calls for channel 0 */
-    if (ch == 0 && getenv("DBG_POST")) {
+    if (ch == 14 && getenv("DBG_POST")) {
         static int _dbg = 0;
         fprintf(stderr, "[CSIM_DBG] #%d acc_in=%ld M=%u S=%u zp=%d bias=%ld bias_en=%d prod=%ld out=%d\n",
                 _dbg++,

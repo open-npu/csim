@@ -13,12 +13,23 @@
 #include "npu_operators.h"
 #include "npu_config.h"
 
-static inline int64_t trunc40(int64_t v) {
-    v = (int64_t)((uint64_t)v << 24 >> 24);  // extract bits [39:0]
-    // Sign-extend bit 39 to match Verilog signed register wrap
-    v <<= 24; v >>= 24;
+/* ACC_WIDTH is configurable. Default 40 (model_b), 44 for ResNet18 (C_in≤256).
+ * CSIM reads it from environment variable ACC_WIDTH at runtime. */
+static int get_acc_width(void) {
+    const char *env = getenv("ACC_WIDTH");
+    return env ? atoi(env) : 40;
+}
+
+static inline int64_t trunc_acc(int64_t v) {
+    int w = get_acc_width();
+    int shift = 64 - w;
+    v = (int64_t)((uint64_t)v << shift >> shift);  // extract bits [w-1:0]
+    v <<= shift; v >>= shift;                        // sign-extend bit w-1
     return v;
 }
+
+/* Backward compat: trunc40 = trunc_acc with ACC_WIDTH=40 */
+#define trunc40(x) trunc_acc(x)
 
 void npu_conv2d(const layer_config_t *cfg,
                 const tensor_t *input,
