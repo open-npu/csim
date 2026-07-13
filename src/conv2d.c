@@ -108,9 +108,13 @@ void npu_conv2d(const layer_config_t *cfg,
 
                     /* Accumulate into dot_buf (RTL dot_buf update) */
                     dot_buf = trunc40(dot_buf + pass_sum);
-                    if (getenv("DBG_ACC28_PASS") && oc == 12 && oh == 0 && ow == 0)
-                        fprintf(stderr, "[CSIM_PASS] pass=%d remain=%d pass_sum=%12ld dot_buf=%12ld\n",
-                                pass, remain, (long)pass_sum, (long)dot_buf);
+                    if (getenv("DBG_ACC28_PASS") && oc == 1 && oh == 0 && ow == 0) {
+                        static int _layer_cnt = 0;
+                        static int _pass_cnt = 0;
+                        fprintf(stderr, "[CSIM_L%02d] pass=%d remain=%d pass_sum=%12ld dot_buf=%12ld\n",
+                                _layer_cnt, pass, remain, (long)pass_sum, (long)dot_buf);
+                        if (pass == (k_depth - 1) / NPU_ARRAY_SIZE) _layer_cnt++;
+                    }
                 }
 
                 output_acc[oh * out_w * out_c + ow * out_c + oc] = dot_buf;

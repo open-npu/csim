@@ -465,6 +465,14 @@ static int execute_layer_tiled(const layer_config_t *cfg,
                     in_tile_w = clip_end_w - clip_start_w;
                     if (in_tile_h < 1) in_tile_h = 1;
                     if (in_tile_w < 1) in_tile_w = 1;
+                } else if (cfg->op_type == OP_RESIZE) {
+                    /* Resize: input tile = output tile / scale (no kernel/stride) */
+                    int scale_h = (cfg->out_h + cfg->in_h - 1) / cfg->in_h;
+                    int scale_w = (cfg->out_w + cfg->in_w - 1) / cfg->in_w;
+                    in_tile_h = (actual_out_h + scale_h - 1) / scale_h;
+                    in_tile_w = (actual_out_w + scale_w - 1) / scale_w;
+                    if (in_tile_h < 1) in_tile_h = 1;
+                    if (in_tile_w < 1) in_tile_w = 1;
                 } else {
                     in_tile_h = actual_out_h * eff_sh + kh_eff - eff_sh;
                     in_tile_w = actual_out_w * eff_sw + kw_eff - eff_sw;
