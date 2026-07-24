@@ -1078,6 +1078,24 @@ int main(int argc, char *argv[])
             layer_outputs[i + 2] = fused_output;
             current = fused_output;
 
+            /* Debug: dump fused block output (as layer i+2) if DUMP_LAYERS env var is set */
+            if (getenv("DUMP_LAYERS")) {
+                char dump_path[256];
+                snprintf(dump_path, sizeof(dump_path), "/tmp/csim_layer_%03u.bin", i + 2);
+                FILE *fdump = fopen(dump_path, "wb");
+                if (fdump) {
+                    int is_out16 = (cfg_c->post_ctrl & POST_INT16_OUT) ? 1 : 0;
+                    size_t n = (size_t)cfg_c->out_h * cfg_c->out_w * cfg_c->out_c;
+                    if (is_out16) {
+                        fwrite(fused_output.data_i16, sizeof(int16_t), n, fdump);
+                    } else {
+                        fwrite(fused_output.data, sizeof(int8_t), n, fdump);
+                    }
+                    fclose(fdump);
+                    printf("    [DUMP] %s (%zu elements, %s)\n", dump_path, n, is_out16 ? "int16" : "int8");
+                }
+            }
+
             /* Skip the next 2 layers */
             i += 2;
             continue;
