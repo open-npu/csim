@@ -65,22 +65,21 @@ int32_t npu_postproc_perchannel(const layer_config_t *cfg, int64_t acc, int ch)
         trunc_40bit((int64_t*)&acc);
     }
 
-    /* Stage 2: Multiply by M (15-bit unsigned) — RTL product is 56-bit signed */
+    /* Stage 2: Multiply by M (15-bit unsigned) — RTL product is PROD_W-bit signed */
+    /* PROD_W = ACC_W + MULT_W + 1. SoC uses ACC_WIDTH=44 → PROD_W=60.
+     * Product fits in 60 bits for all practical inputs (40-bit acc * 15-bit M). */
     int64_t product = acc * (int64_t)(p->M & 0x7FFF);
-    /* Truncate to 56-bit signed to match RTL PPU Stage 2 register width */
-    product = (int64_t)((uint64_t)product << 8 >> 8);
-    product <<= 8; product >>= 8;  // sign-extend bit 55
 
     /* Stage 3: Rounding right shift by S (6-bit, 0~63) */
+    /* RTL PPU: PROD_W = ACC_W + MULT_W + 1 = 44 + 15 + 1 = 60 (SoC config) */
     uint8_t shift = p->S & 0x3F;
     int64_t result;
     if (shift > 0) {
-        /* RTL: rounding add also wraps at 56 bits. For S >= 56, rounding = 0.
-         * For S < 56: rounded_v = product + (1 << (S-1)) in 56-bit signed. */
-        int64_t rbit = (shift < 56) ? ((int64_t)1 << (shift - 1)) : 0;
+        /* RTL: rounding add wraps at PROD_W bits. For S >= PROD_W, rounding = 0.
+         * For S < PROD_W: rounded_v = product + (1 << (S-1)) in PROD_W-bit signed. */
+        const int PROD_W = 60;
+        int64_t rbit = (shift < PROD_W) ? ((int64_t)1 << (shift - 1)) : 0;
         int64_t rounded = product + rbit;
-        rounded = (int64_t)((uint64_t)rounded << 8 >> 8);  // mask to 56-bit
-        rounded <<= 8; rounded >>= 8;                        // sign-extend bit 55
         result = rounded >> shift;
     } else {
         result = product;
