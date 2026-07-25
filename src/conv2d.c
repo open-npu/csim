@@ -93,7 +93,10 @@ void npu_conv2d(const layer_config_t *cfg,
                                 in_val = is_int16
                                     ? tensor_get_i16(input, ih, iw, ic)
                                     : (int16_t)tensor_get_i8(input, ih, iw, ic);
-                                w_val = weights_i16[oc * w_stride_oc + fh * w_stride_kh + fw * w_stride_kw + ic];
+                                if (is_int16)
+                                    w_val = weights_i16[oc * w_stride_oc + fh * w_stride_kh + fw * w_stride_kw + ic];
+                                else
+                                    w_val = (int16_t)weights[oc * w_stride_oc + fh * w_stride_kh + fw * w_stride_kw + ic];
                                 pi = elem_idx - start; /* PE index within this pass */
                                 pe[pi] += (int64_t)in_val * (int64_t)w_val;
                                 pe[pi] = trunc40(pe[pi]);

@@ -71,13 +71,13 @@ int32_t npu_postproc_perchannel(const layer_config_t *cfg, int64_t acc, int ch)
     int64_t product = acc * (int64_t)(p->M & 0x7FFF);
 
     /* Stage 3: Rounding right shift by S (6-bit, 0~63) */
-    /* RTL PPU: PROD_W = ACC_W + MULT_W + 1 = 44 + 15 + 1 = 60 (SoC config) */
+    /* RTL PPU: PROD_W = ACC_W + MULT_W + 1. SoC uses ACC_WIDTH=44 → PROD_W=60. */
     uint8_t shift = p->S & 0x3F;
     int64_t result;
     if (shift > 0) {
         /* RTL: rounding add wraps at PROD_W bits. For S >= PROD_W, rounding = 0.
          * For S < PROD_W: rounded_v = product + (1 << (S-1)) in PROD_W-bit signed. */
-        const int PROD_W = 60;
+        const int PROD_W = get_acc_width() + 15 + 1;  /* ACC_W + MULT_W + 1 */
         int64_t rbit = (shift < PROD_W) ? ((int64_t)1 << (shift - 1)) : 0;
         int64_t rounded = product + rbit;
         result = rounded >> shift;
