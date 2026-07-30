@@ -103,6 +103,20 @@ typedef struct {
     uint8_t  resize_mode;       /* 0=nearest, 1=bilinear */
     uint8_t  scale_h, scale_w;  /* Q4.4 fixed-point */
 
+    /* Resize tiling context (runtime-only, not serialized).
+     * Resize coordinates are GLOBAL: source pixel for output row oh_global is
+     * (oh_global * full_in_h) / full_out_h. When a Resize layer is tiled, the
+     * per-tile config carries in_h/in_w/out_h/out_w of the *tile*, so these
+     * fields preserve the full-tensor dims plus the tile origins needed to
+     * convert global coords into tile-local buffer indices.
+     * rsz_tiled == 0 (calloc default) → non-tiled, resize.c uses cfg->in_h etc.
+     * Mirrors RTL npu_compute.v tile_oh_origin / rsz_tile_ih_origin. */
+    uint8_t  rsz_tiled;
+    uint16_t rsz_full_in_h,  rsz_full_in_w;
+    uint16_t rsz_full_out_h, rsz_full_out_w;
+    uint16_t rsz_tile_oh_origin, rsz_tile_ow_origin;  /* output-space tile origin */
+    uint16_t rsz_tile_ih_origin, rsz_tile_iw_origin;  /* input-space tile origin */
+
     /* Deconv */
     uint8_t  insert_h, insert_w;
 

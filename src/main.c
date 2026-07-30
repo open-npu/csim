@@ -382,6 +382,52 @@ static int execute_layer(const layer_config_t *cfg,
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 #endif
 
+/*
+ * Resize tile geometry helper.
+ *
+ * Resize coordinate mapping is GLOBAL: output pixel `o` reads input pixel
+ * (o * in_dim) / out_dim over the WHOLE tensor. It is NOT a per-tile
+ * kernel/stride walk, so the generic `tile_idx * tile * stride` origin used by
+ * Conv/Pool/DW is wrong for Resize (stride is 1, which leaves the origin in
+ * output space and, for later tiles, points past the end of the input).
+ *
+ * Given the output range [out_start, out_start+out_cnt) of one tile, this
+ * returns the input-space origin and extent of the region that range reads.
+ * Matches RTL npu_compute.v rsz_tile_i{h,w}_origin (line ~664).
+ */
+static void resize_in_range(int out_start, int out_cnt,
+                            int in_dim, int out_dim, int mode,
+                            int *org, int *ext)
+{
+    int first, last;
+    if (out_cnt < 1) out_cnt = 1;
+
+    if (mode == 0) {
+        /* Nearest: same integer division as npu_resize() */
+        first = (out_start * in_dim) / out_dim;
+        last  = ((out_start + out_cnt - 1) * in_dim) / out_dim;
+    } else {
+        /* Bilinear: Q8.8 source coord, taps at ih0 and ih0+1 */
+        if (out_dim > 1) {
+            first = (int)(((int32_t)out_start * ((in_dim - 1) << 8)) / (out_dim - 1)) >> 8;
+            last  = (int)(((int32_t)(out_start + out_cnt - 1) * ((in_dim - 1) << 8))
+                          / (out_dim - 1)) >> 8;
+        } else {
+            first = 0;
+            last  = 0;
+        }
+        last += 1;   /* second tap */
+    }
+
+    if (first > in_dim - 1) first = in_dim - 1;
+    if (first < 0)          first = 0;
+    if (last  > in_dim - 1) last  = in_dim - 1;
+    if (last  < first)      last  = first;
+
+    *org = first;
+    *ext = last - first + 1;
+}
+
 static int execute_layer_tiled(const layer_config_t *cfg,
                                tensor_t *input,
                                tensor_t *input_b,
@@ -449,6 +495,8 @@ static int execute_layer_tiled(const layer_config_t *cfg,
 
                 /* Input tile dimensions (with halo) */
                 int in_tile_h, in_tile_w;
+                /* Resize-only: input-space origin of this tile (unused otherwise) */
+                int rsz_ih_org = 0, rsz_iw_org = 0;
                 if (cfg->op_type == OP_POOLING) {
                     /* For pooling: extract exact input region without zp padding.
                      * Pooling handles padding via bounds checking internally. */
@@ -466,13 +514,15 @@ static int execute_layer_tiled(const layer_config_t *cfg,
                     if (in_tile_h < 1) in_tile_h = 1;
                     if (in_tile_w < 1) in_tile_w = 1;
                 } else if (cfg->op_type == OP_RESIZE) {
-                    /* Resize: input tile = output tile / scale (no kernel/stride) */
-                    int scale_h = (cfg->out_h + cfg->in_h - 1) / cfg->in_h;
-                    int scale_w = (cfg->out_w + cfg->in_w - 1) / cfg->in_w;
-                    in_tile_h = (actual_out_h + scale_h - 1) / scale_h;
-                    in_tile_w = (actual_out_w + scale_w - 1) / scale_w;
-                    if (in_tile_h < 1) in_tile_h = 1;
-                    if (in_tile_w < 1) in_tile_w = 1;
+                    /* Resize: coordinates are GLOBAL, not a stride walk.
+                     * Derive both the input-space origin and the extent from the
+                     * output range this tile covers. */
+                    resize_in_range(out_start_h, actual_out_h,
+                                    cfg->in_h, cfg->out_h, cfg->resize_mode,
+                                    &rsz_ih_org, &in_tile_h);
+                    resize_in_range(out_start_w, actual_out_w,
+                                    cfg->in_w, cfg->out_w, cfg->resize_mode,
+                                    &rsz_iw_org, &in_tile_w);
                 } else {
                     in_tile_h = actual_out_h * eff_sh + kh_eff - eff_sh;
                     in_tile_w = actual_out_w * eff_sw + kw_eff - eff_sw;
@@ -524,6 +574,27 @@ static int execute_layer_tiled(const layer_config_t *cfg,
                             }
                         }
                     }
+                } else if (cfg->op_type == OP_RESIZE) {
+                    /* Resize: copy the input-space region [rsz_i*_org, +in_tile_*)
+                     * that the global coord mapping selects for this tile.
+                     * (dma_extract_tile's stride-based origin is wrong here.) */
+                    for (int th = 0; th < in_tile_h; th++) {
+                        int src_h = rsz_ih_org + th;
+                        if (src_h >= cfg->in_h) src_h = cfg->in_h - 1;
+                        for (int tw = 0; tw < in_tile_w; tw++) {
+                            int src_w = rsz_iw_org + tw;
+                            if (src_w >= cfg->in_w) src_w = cfg->in_w - 1;
+                            for (int tcc = 0; tcc < cfg->in_c; tcc++) {
+                                if (is_int16) {
+                                    tensor_set_i16(&tile_in, th, tw, tcc,
+                                        tensor_get_i16(input, src_h, src_w, tcc));
+                                } else {
+                                    tensor_set_i8(&tile_in, th, tw, tcc,
+                                        tensor_get_i8(input, src_h, src_w, tcc));
+                                }
+                            }
+                        }
+                    }
                 } else {
                     /* For conv/dw/etc: use DMA extract with halo + zp padding */
                     dma_extract_tile(&ext_cfg, input, tr, tc, &tile_in);
@@ -565,6 +636,22 @@ static int execute_layer_tiled(const layer_config_t *cfg,
                 tile_cfg.out_h = actual_out_h;
                 tile_cfg.out_w = actual_out_w;
                 tile_cfg.out_c = cur_tile_oc;
+
+                /* Resize: hand npu_resize the full-tensor dims + tile origins so
+                 * it reproduces the GLOBAL coordinate mapping. Without this it
+                 * would use the tile-local in_h/out_h ratio, which only happens
+                 * to be right for tile (0,0). */
+                if (cfg->op_type == OP_RESIZE) {
+                    tile_cfg.rsz_tiled          = 1;
+                    tile_cfg.rsz_full_in_h      = cfg->in_h;
+                    tile_cfg.rsz_full_in_w      = cfg->in_w;
+                    tile_cfg.rsz_full_out_h     = cfg->out_h;
+                    tile_cfg.rsz_full_out_w     = cfg->out_w;
+                    tile_cfg.rsz_tile_oh_origin = (uint16_t)out_start_h;
+                    tile_cfg.rsz_tile_ow_origin = (uint16_t)out_start_w;
+                    tile_cfg.rsz_tile_ih_origin = (uint16_t)rsz_ih_org;
+                    tile_cfg.rsz_tile_iw_origin = (uint16_t)rsz_iw_org;
+                }
 
                 /* Padding handling:
                  * For conv/dwconv: halo is already in tile, set pad=0.
