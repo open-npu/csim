@@ -8,5 +8,6 @@ testdata/*.bin
 *.swp
 *~
 test_add_e2e
+test_resize_tiling
 testdata/*.bin
 testdata/*.txt
