@@ -596,8 +596,14 @@ static int execute_layer_tiled(const layer_config_t *cfg,
                         }
                     }
                 } else {
-                    /* For conv/dw/etc: use DMA extract with halo + zp padding */
-                    dma_extract_tile(&ext_cfg, input, tr, tc, &tile_in);
+                    /* For conv/dw/etc: use DMA extract with halo + zp padding.
+                     * Concat with residual_src scatters a skip-connection branch:
+                     * its data source is input_b, not input (which may be the
+                     * previous concat phase's shared output buffer). */
+                    tensor_t *extract_src = (cfg->op_type == OP_CONCAT &&
+                                             cfg->residual_src >= 0 && input_b)
+                                            ? input_b : input;
+                    dma_extract_tile(&ext_cfg, extract_src, tr, tc, &tile_in);
                 }
 
                 /* Also extract input_b tile for Add (same spatial position) */
@@ -636,6 +642,15 @@ static int execute_layer_tiled(const layer_config_t *cfg,
                 tile_cfg.out_h = actual_out_h;
                 tile_cfg.out_w = actual_out_w;
                 tile_cfg.out_c = cur_tile_oc;
+
+                /* Concat: tile_out holds only this phase's own channels
+                 * [0:in_c). The scatter offset into the shared full-width
+                 * output buffer is applied at store time (oc_offset below),
+                 * so the channels owned by other concat phases are preserved. */
+                if (cfg->op_type == OP_CONCAT) {
+                    tile_cfg.out_c = cfg->in_c;
+                    tile_cfg.concat_offset = 0;
+                }
 
                 /* Resize: hand npu_resize the full-tensor dims + tile origins so
                  * it reproduces the GLOBAL coordinate mapping. Without this it
@@ -677,10 +692,11 @@ static int execute_layer_tiled(const layer_config_t *cfg,
 
                 /* Allocate tile output */
                 tensor_t tile_out;
+                int tile_out_c = (cfg->op_type == OP_CONCAT) ? cfg->in_c : cur_tile_oc;
                 if (cfg->post_ctrl & POST_INT16_OUT) {
-                    tile_out = tensor_alloc_i16(actual_out_h, actual_out_w, cur_tile_oc);
+                    tile_out = tensor_alloc_i16(actual_out_h, actual_out_w, tile_out_c);
                 } else {
-                    tile_out = tensor_alloc_i8(actual_out_h, actual_out_w, cur_tile_oc);
+                    tile_out = tensor_alloc_i8(actual_out_h, actual_out_w, tile_out_c);
                 }
 
                 /* Slice weights for this OC group */
@@ -710,11 +726,14 @@ static int execute_layer_tiled(const layer_config_t *cfg,
                     return ret;
                 }
 
-                /* Store tile output back to full output (with OC offset) */
+                /* Store tile output back to full output (with OC offset).
+                 * Concat stores only its own channel range at concat_offset,
+                 * preserving other phases' channels in the shared buffer. */
+                int store_oc = (cfg->op_type == OP_CONCAT) ? cfg->concat_offset : oc_start;
                 layer_config_t store_cfg = *cfg;
                 store_cfg.tile_h = tile_h;
                 store_cfg.tile_w = tile_w;
-                dma_store_tile_oc(&store_cfg, &tile_out, tr, tc, oc_start, output);
+                dma_store_tile_oc(&store_cfg, &tile_out, tr, tc, store_oc, output);
 
                 tensor_free(&tile_in);
                 tensor_free(&tile_in_b);
