@@ -17,7 +17,7 @@
  * CSIM reads it from environment variable ACC_WIDTH at runtime. */
 static int get_acc_width(void) {
     const char *env = getenv("ACC_WIDTH");
-    return env ? atoi(env) : 40;
+    return env ? atoi(env) : 44;
 }
 
 static inline int64_t trunc_acc(int64_t v) {

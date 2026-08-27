@@ -12,8 +12,8 @@
 /* Reciprocal LUT — must match npu_compute.v recip_pool() exactly */
 static const int32_t pool_recip[] = {
     0,            /* 0 (unused) */
-    0x80000000,   /* 1/1 with >>31 */
-    0x80000000,   /* 1/2 with >>32 */
+    0,            /* 1: identity, handled without multiplication */
+    0x40000000,   /* 1/2 with >>31 (keeps multiplier signed-positive) */
     0x55555556,
     0x40000000,
     0x33333333,
@@ -116,13 +116,14 @@ void npu_pooling(const layer_config_t *cfg,
                         rounded = (int64_t)result + half_count;
                     else
                         rounded = (int64_t)result - half_count;
-                    int32_t recip = (count < pool_recip_size && pool_recip[count] != 0)
-                                    ? pool_recip[count] : 0x01000000;
-                    int64_t prod = rounded * (int64_t)recip;
-                    if (count == 1)
-                        result = (int32_t)(prod >> 31);
-                    else
-                        result = (int32_t)(prod >> 32);
+                    if (count == 1) {
+                        result = rounded;
+                    } else {
+                        int32_t recip = (count < pool_recip_size && pool_recip[count] != 0)
+                                        ? pool_recip[count] : 0x01000000;
+                        int64_t prod = rounded * (int64_t)recip;
+                        result = (int32_t)(prod >> (count == 2 ? 31 : 32));
+                    }
                 }
 
                 int out_idx = oh * out_w * ch + ow * ch + c;

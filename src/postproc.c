@@ -16,7 +16,7 @@
  * ACC_WIDTH read from env var (default 40, set 44 for ResNet18). */
 static int get_acc_width(void) {
     const char *env = getenv("ACC_WIDTH");
-    return env ? atoi(env) : 40;
+    return env ? atoi(env) : 44;
 }
 
 static inline void trunc_40bit(int64_t *v) {
