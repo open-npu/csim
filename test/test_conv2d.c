@@ -200,6 +200,50 @@ static void test_pooling_max(void)
     tensor_free(&input);
 }
 
+static void test_pooling_avg_recip_edges(void)
+{
+    printf("Test: AvgPool reciprocal edge counts...\n");
+
+    layer_config_t cfg = {0};
+    cfg.op_type = OP_POOLING;
+    cfg.pool_mode = 1; /* Average */
+    cfg.in_c = cfg.out_c = 1;
+
+    /* count=1 must be identity, not sign inversion. */
+    cfg.in_h = cfg.in_w = cfg.out_h = cfg.out_w = 1;
+    cfg.pool_h = cfg.pool_w = cfg.pool_stride_h = cfg.pool_stride_w = 1;
+    tensor_t one = tensor_alloc_i8(1, 1, 1);
+    one.data[0] = 5;
+    int64_t acc_one[1] = {0};
+    npu_pooling(&cfg, &one, acc_one);
+    ASSERT_EQ(acc_one[0], 5, "avgpool count=1");
+    tensor_free(&one);
+
+    /* count=2 uses the RTL's positive 0x40000000 multiplier and >>31. */
+    cfg.in_h = 1; cfg.in_w = 2;
+    cfg.out_h = cfg.out_w = 1;
+    cfg.pool_h = 1; cfg.pool_w = 2;
+    cfg.pool_stride_h = 1; cfg.pool_stride_w = 2;
+    tensor_t two = tensor_alloc_i8(1, 2, 1);
+    two.data[0] = 2;
+    two.data[1] = 4;
+    int64_t acc_two[1] = {0};
+    npu_pooling(&cfg, &two, acc_two);
+    ASSERT_EQ(acc_two[0], 3, "avgpool count=2");
+    tensor_free(&two);
+
+    /* 8x8 global average exercises reciprocal index 64. */
+    cfg.in_h = cfg.in_w = 8;
+    cfg.out_h = cfg.out_w = 1;
+    cfg.global_pool = 1;
+    tensor_t sixty_four = tensor_alloc_i8(8, 8, 1);
+    memset(sixty_four.data, 64, 64);
+    int64_t acc_sixty_four[1] = {0};
+    npu_pooling(&cfg, &sixty_four, acc_sixty_four);
+    ASSERT_EQ(acc_sixty_four[0], 64, "avgpool count=64");
+    tensor_free(&sixty_four);
+}
+
 /* ─── Test 6: Conv2D INT16 ─── */
 static void test_conv2d_int16(void)
 {
@@ -339,6 +383,7 @@ int main(void)
     test_dwconv_3x3();
     test_fc_basic();
     test_pooling_max();
+    test_pooling_avg_recip_edges();
     test_conv2d_int16();
     test_dwconv_int16();
     test_fc_int16();

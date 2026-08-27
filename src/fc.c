@@ -5,16 +5,22 @@
  * Weight layout: [out_c][in_c]
  * Input layout:  NHWC with h=1, w=1, c=in_c
  *
- * RTL PE wraps accumulator at 40 bits on EVERY MAC cycle.
+ * RTL PE wraps accumulator at ACC_WIDTH bits on EVERY MAC cycle.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "npu_operators.h"
 
-static inline int64_t trunc40(int64_t v) {
-    v = (int64_t)((uint64_t)v << 24 >> 24);  // extract bits [39:0]
-    v <<= 24; v >>= 24;                        // sign-extend bit 39
+static int get_acc_width(void) {
+    const char *env = getenv("ACC_WIDTH");
+    return env ? atoi(env) : 44;
+}
+
+static inline int64_t trunc_acc(int64_t v) {
+    int shift = 64 - get_acc_width();
+    v = (int64_t)((uint64_t)v << shift >> shift);
+    v <<= shift; v >>= shift;
     return v;
 }
 
@@ -42,7 +48,7 @@ void npu_fc(const layer_config_t *cfg,
                 int8_t w_val  = weights[oc * in_c + ic];
                 acc += (int64_t)in_val * (int64_t)w_val;
             }
-            acc = trunc40(acc);
+            acc = trunc_acc(acc);
         }
 
         output_acc[oc] = acc;

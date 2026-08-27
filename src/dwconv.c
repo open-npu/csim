@@ -13,9 +13,15 @@
 
 #include "npu_operators.h"
 
-static inline int64_t trunc40(int64_t v) {
-    v = (int64_t)((uint64_t)v << 24 >> 24);  // extract bits [39:0]
-    v <<= 24; v >>= 24;                        // sign-extend bit 39
+static int get_acc_width(void) {
+    const char *env = getenv("ACC_WIDTH");
+    return env ? atoi(env) : 44;
+}
+
+static inline int64_t trunc_acc(int64_t v) {
+    int shift = 64 - get_acc_width();
+    v = (int64_t)((uint64_t)v << shift >> shift);
+    v <<= shift; v >>= shift;
     return v;
 }
 
@@ -67,7 +73,7 @@ void npu_dwconv(const layer_config_t *cfg,
                             int8_t w_val  = weights[w_idx];
                             acc += (int64_t)in_val * (int64_t)w_val;
                         }
-                        acc = trunc40(acc);
+                        acc = trunc_acc(acc);
                     }
                 }
 
