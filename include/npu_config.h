@@ -5,7 +5,7 @@
  * All parameters can be overridden at compile time via -D flags:
  *   make CFLAGS_HW="-DNPU_ARRAY_SIZE=4 -DNPU_SPAD_SIZE_KB=32 -DNPU_HAS_INT16=0"
  *
- * Defaults match the 0.2T reference design (16×16, 128KB, INT8+INT16).
+ * Defaults match the A/D-oriented 8×8, 192KB scratchpad, INT8+INT16.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -16,7 +16,7 @@
 /* ─── Primary parameters (override via -D) ─── */
 
 #ifndef NPU_ARRAY_SIZE
-#define NPU_ARRAY_SIZE       16      /* Systolic array dimension (N×N) */
+#define NPU_ARRAY_SIZE       8       /* Systolic array dimension (N×N) */
 #endif
 
 #ifndef NPU_NUM_ARRAYS
