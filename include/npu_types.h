@@ -134,6 +134,7 @@ typedef struct {
     int16_t  clamp_min;         /* 16-bit signed min (INT8: -128, INT16: -32768) */
     int16_t  clamp_max;         /* 16-bit signed max (INT8: 127, INT16: 32767) */
     int8_t   in_zp;             /* input zero point (for padding fill value) */
+    uint8_t  wgt_layout;        /* 0=OC-major, 1=K-major (see npu_operators.h) */
 
     /* Per-channel params (pointer, not serialized in fixed config) */
     perchannel_param_t *ch_params;   /* [out_c], NULL if PASSTHROUGH */

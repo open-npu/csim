@@ -62,7 +62,9 @@ void npu_dwconv(const layer_config_t *cfg,
                         int iw = ow * sw - pad_l + fw * dw;
                         if (iw < 0 || iw >= in_w) continue;
 
-                        int w_idx = c * w_per_channel + fh * kw + fw;
+                        int w_idx = npu_dw_w_index(cfg->wgt_layout, c,
+                                                   fh * kw + fw, ch,
+                                                   w_per_channel);
 
                         if (is_int16) {
                             int16_t in_val = tensor_get_i16(input, ih, iw, c);

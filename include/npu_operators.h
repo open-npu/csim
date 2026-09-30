@@ -19,6 +19,43 @@
  *   - bias array: INT32, one per output channel
  */
 
+/*
+ * Weight blob layouts (cfg->wgt_layout), mirroring tools/model_packer.py.
+ *
+ * OC_MAJOR  dense [OC][KH][KW][IC], depthwise [C][KH][KW]
+ * K_MAJOR   dense: output channels grouped by NPU_MAC_LANES, K-major inside a
+ *           group so the 64-lane row gets a tap's weights in one SRAM beat.
+ *           depthwise: tap-major [KH][KW][C].
+ *
+ * Both layouts occupy the same number of bytes.
+ */
+#define NPU_WGT_LAYOUT_OC_MAJOR 0
+#define NPU_WGT_LAYOUT_K_MAJOR  1
+#define NPU_MAC_LANES           64
+
+/* Element index of dense weight (oc, k), k = fh*KW*IC + fw*IC + ic. */
+static inline int npu_conv_w_index(int layout, int oc, int k,
+                                   int out_c, int k_depth)
+{
+    int group, group_w;
+    if (layout != NPU_WGT_LAYOUT_K_MAJOR)
+        return oc * k_depth + k;
+    group = oc / NPU_MAC_LANES;
+    group_w = out_c - group * NPU_MAC_LANES;
+    if (group_w > NPU_MAC_LANES) group_w = NPU_MAC_LANES;
+    return group * NPU_MAC_LANES * k_depth + k * group_w
+         + (oc - group * NPU_MAC_LANES);
+}
+
+/* Element index of depthwise weight (c, tap), tap = fh*KW + fw. */
+static inline int npu_dw_w_index(int layout, int c, int tap,
+                                 int channels, int taps)
+{
+    if (layout != NPU_WGT_LAYOUT_K_MAJOR)
+        return c * taps + tap;
+    return tap * channels + c;
+}
+
 /* Conv2D: standard 2D convolution
  * weights layout: [out_c][kernel_h][kernel_w][in_c] (NHWC-style for weight)
  */
