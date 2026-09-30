@@ -67,7 +67,7 @@ typedef struct {
     int16_t  clamp_min;
     int16_t  clamp_max;
     int8_t   in_zp;
-    uint8_t  _pad1;
+    uint8_t  wgt_layout;      /* 0=OC-major, 1=K-major (64-lane row) */
     uint16_t param_ch_count;  /* number of output channels with per-ch params */
     uint8_t  has_lut;         /* 1 = LUT data follows */
     uint8_t  has_add;         /* 1 = add_param_t follows */
@@ -107,7 +107,7 @@ static void check_fixed_config_layout(void) {
     CHECK_OFFSET(clamp_min,     49);
     CHECK_OFFSET(clamp_max,     51);
     CHECK_OFFSET(in_zp,         53);
-    CHECK_OFFSET(_pad1,         54);
+    CHECK_OFFSET(wgt_layout,    54);
     CHECK_OFFSET(param_ch_count,55);
     CHECK_OFFSET(has_lut,       57);
     CHECK_OFFSET(has_add,       58);
@@ -239,6 +239,7 @@ static int load_model(const char *path,
         cfg->clamp_min   = fc.clamp_min;
         cfg->clamp_max   = fc.clamp_max;
         cfg->in_zp       = fc.in_zp;
+        cfg->wgt_layout  = fc.wgt_layout;
         cfg->residual_src = fc.residual_src;
         cfg->input_src    = fc.input_src;
 
@@ -699,10 +700,19 @@ static int execute_layer_tiled(const layer_config_t *cfg,
                     tile_out = tensor_alloc_i8(actual_out_h, actual_out_w, tile_out_c);
                 }
 
-                /* Slice weights for this OC group */
+                /* Slice weights for this OC group. A K-major blob cannot be
+                 * cut at an arbitrary channel, but the compiler only emits
+                 * K-major when the whole tensor fits the weight buffer, so
+                 * tile_oc == out_c and this slice is always the identity. */
                 const int8_t *w_slice = weights;
                 if (has_weights && weights) {
                     int w_per_oc = cfg->kernel_h * cfg->kernel_w * cfg->in_c * elem_size;
+                    if (cfg->wgt_layout == NPU_WGT_LAYOUT_K_MAJOR && oc_start != 0) {
+                        fprintf(stderr,
+                                "Error: K-major weights split at oc_start=%d\n",
+                                oc_start);
+                        return -1;
+                    }
                     w_slice = weights + oc_start * w_per_oc;
                 }
 

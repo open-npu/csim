@@ -60,18 +60,19 @@ void npu_deconv(const layer_config_t *cfg,
                         if (ew % (ins_w + 1) != 0) continue;
                         int iw = ew / (ins_w + 1);
 
-                        int w_base = oc * w_stride_oc +
-                                     fh * w_stride_kh +
-                                     fw * w_stride_kw;
+                        int k_base = fh * w_stride_kh + fw * w_stride_kw;
 
                         for (int ic = 0; ic < in_c; ic++) {
+                            int w_idx = npu_conv_w_index(cfg->wgt_layout, oc,
+                                                         k_base + ic,
+                                                         out_c, w_stride_oc);
                             if (is_int16) {
                                 int16_t in_val = tensor_get_i16(input, ih, iw, ic);
-                                int16_t w_val  = weights_i16[w_base + ic];
+                                int16_t w_val  = weights_i16[w_idx];
                                 acc += (int64_t)in_val * (int64_t)w_val;
                             } else {
                                 int8_t in_val = tensor_get_i8(input, ih, iw, ic);
-                                int8_t w_val  = weights[w_base + ic];
+                                int8_t w_val  = weights[w_idx];
                                 acc += (int64_t)in_val * (int64_t)w_val;
                             }
                         }
