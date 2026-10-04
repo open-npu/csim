@@ -785,7 +785,6 @@ static int execute_fused_block(const layer_config_t *cfg_a,  /* Conv1×1 expand 
     /* Data type: 0=INT8, 1=INT16 */
     const int is_int16 = (cfg_a->data_type == 1);
     const int elem_size = is_int16 ? 2 : 1;
-    (void)elem_size; /* used implicitly via alloc helpers */
 
     /* DW kernel info */
     const int dw_kh = cfg_b->kernel_h;
@@ -805,7 +804,7 @@ static int execute_fused_block(const layer_config_t *cfg_a,  /* Conv1×1 expand 
     /* OC tiling for Conv1×1 #1 (expand) */
     int oc1_tile = c_mid;
     {
-        int w_per_oc = cfg_a->kernel_h * cfg_a->kernel_w * c_in;
+        int w_per_oc = cfg_a->kernel_h * cfg_a->kernel_w * c_in * elem_size;
         if (w_per_oc > 0) {
             int max_oc = (int)(NPU_WEIGHT_BUF_SIZE / (unsigned)w_per_oc);
             if (max_oc < c_mid) oc1_tile = max_oc;
@@ -816,7 +815,7 @@ static int execute_fused_block(const layer_config_t *cfg_a,  /* Conv1×1 expand 
     /* OC tiling for Conv1×1 #2 (project) */
     int oc2_tile = c_out;
     {
-        int w_per_oc = cfg_c->kernel_h * cfg_c->kernel_w * c_mid;
+        int w_per_oc = cfg_c->kernel_h * cfg_c->kernel_w * c_mid * elem_size;
         if (w_per_oc > 0) {
             int max_oc = (int)(NPU_WEIGHT_BUF_SIZE / (unsigned)w_per_oc);
             if (max_oc < c_out) oc2_tile = max_oc;
