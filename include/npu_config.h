@@ -3,7 +3,8 @@
  * npu_config.h — Hardware configuration constants
  *
  * All parameters can be overridden at compile time via -D flags:
- *   make CFLAGS_HW="-DNPU_ARRAY_SIZE=4 -DNPU_SPAD_SIZE_KB=32 -DNPU_HAS_INT16=0"
+ *   make CFLAGS_HW="-DNPU_ARRAY_SIZE=4 -DNPU_ACT_BANK_SIZE=8192 \
+ *                   -DNPU_WEIGHT_BUF_SIZE=16384 -DNPU_HAS_INT16=0"
  *
  * Defaults match the A/D-oriented 8×8, 192KB scratchpad, INT8+INT16.
  *
@@ -28,7 +29,7 @@
 #endif
 
 #ifndef NPU_SPAD_SIZE_KB
-#define NPU_SPAD_SIZE_KB     128     /* Total scratchpad size in KB */
+#define NPU_SPAD_SIZE_KB     192     /* HW_CONFIG-reported profile size */
 #endif
 
 #ifndef NPU_HAS_INT16
@@ -47,11 +48,14 @@
 
 #define NPU_MACS_PER_CYCLE   (NPU_ARRAY_SIZE * NPU_ARRAY_SIZE * NPU_NUM_ARRAYS)
 
-/* Activation buffer: ping-pong, each bank = SPAD/4 */
-#define NPU_ACT_BANK_SIZE    (NPU_SPAD_SIZE_KB * 1024 / 4)
+/* Compiler-visible capacities; keep aligned with tools/hw_config.py. */
+#ifndef NPU_ACT_BANK_SIZE
+#define NPU_ACT_BANK_SIZE    (24 * 1024)
+#endif
 
-/* Weight buffer: half of SPAD */
-#define NPU_WEIGHT_BUF_SIZE  (NPU_SPAD_SIZE_KB * 1024 / 2)
+#ifndef NPU_WEIGHT_BUF_SIZE
+#define NPU_WEIGHT_BUF_SIZE  (64 * 1024)
+#endif
 
 /* Simulator memory pool (external SRAM simulation) */
 #define SIM_MEMORY_SIZE      (4 * 1024 * 1024)  /* 4MB simulated external memory */

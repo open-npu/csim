@@ -12,6 +12,24 @@
 
 #include "npu_operators.h"
 
+static int get_acc_width(void)
+{
+    const char *env = getenv("ACC_WIDTH");
+    return env ? atoi(env) : 44;
+}
+
+static inline int64_t trunc_acc(int64_t v)
+{
+    const int width = get_acc_width();
+    if (width >= 64)
+        return v;
+    const uint64_t mask = (UINT64_C(1) << width) - 1;
+    uint64_t bits = (uint64_t)v & mask;
+    if (bits & (UINT64_C(1) << (width - 1)))
+        bits |= ~mask;
+    return (int64_t)bits;
+}
+
 void npu_deconv(const layer_config_t *cfg,
                 const tensor_t *input,
                 const int8_t *weights,
@@ -75,6 +93,7 @@ void npu_deconv(const layer_config_t *cfg,
                                 int8_t w_val  = weights[w_idx];
                                 acc += (int64_t)in_val * (int64_t)w_val;
                             }
+                            acc = trunc_acc(acc);
                         }
                     }
                 }

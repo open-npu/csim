@@ -116,7 +116,6 @@ void npu_conv2d(const layer_config_t *cfg,
                     dot_buf = trunc40(dot_buf + pass_sum);
                     if (getenv("DBG_ACC28_PASS") && oc == 1 && oh == 0 && ow == 0) {
                         static int _layer_cnt = 0;
-                        static int _pass_cnt = 0;
                         fprintf(stderr, "[CSIM_L%02d] pass=%d remain=%d pass_sum=%12ld dot_buf=%12ld\n",
                                 _layer_cnt, pass, remain, (long)pass_sum, (long)dot_buf);
                         if (pass == (k_depth - 1) / NPU_ARRAY_SIZE) _layer_cnt++;
@@ -130,10 +129,15 @@ void npu_conv2d(const layer_config_t *cfg,
                 if (getenv("DBG_ACC28") && oc == 12 && oh == 0 && ow == 0)
                     fprintf(stderr, "[CSIM_ACC28] pixel(0,0) chloc=%d oc=%d acc=%ld\n",
                             (int)oc, (int)cfg->out_c, (long)dot_buf);
-                if (getenv("DBG_ACC28_PASS") && oc == 12 && oh == 0 && ow == 0) {
-                    for (int p = 0; p <= k_depth/NPU_ARRAY_SIZE; p++)
-                        fprintf(stderr, "  pass %d: pe[0]=%ld pe[8]=%ld pe[15]=%ld\n", p,
-                                (long)pe[0], (long)(p*NPU_ARRAY_SIZE+8<k_depth?pe[8]:0), (long)pe[(k_depth-1)%NPU_ARRAY_SIZE]);
+                if (getenv("DBG_ACC28_PASS") && oc == 12 && oh == 0 && ow == 0
+                        && k_depth > 0) {
+                    int mid = NPU_ARRAY_SIZE / 2;
+                    int final_remain = k_depth % NPU_ARRAY_SIZE;
+                    if (final_remain == 0) final_remain = NPU_ARRAY_SIZE;
+                    fprintf(stderr, "  final pass: pe[0]=%ld pe[mid]=%ld pe[last]=%ld\n",
+                            (long)pe[0],
+                            (long)(mid < final_remain ? pe[mid] : 0),
+                            (long)pe[final_remain - 1]);
                 }
             }
         }

@@ -9,6 +9,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include "npu_types.h"
 #include "npu_operators.h"
@@ -373,6 +374,63 @@ static void test_pooling_int16(void)
     tensor_free(&input);
 }
 
+static void test_deconv_2x2_stride2(void)
+{
+    printf("Test: Deconv 2x2 stride2...\n");
+
+    layer_config_t cfg = {0};
+    cfg.op_type = OP_DECONV;
+    cfg.in_h = 2; cfg.in_w = 2; cfg.in_c = 1;
+    cfg.out_h = 4; cfg.out_w = 4; cfg.out_c = 1;
+    cfg.kernel_h = 2; cfg.kernel_w = 2;
+    cfg.insert_h = 1; cfg.insert_w = 1;
+
+    tensor_t input = tensor_alloc_i8(2, 2, 1);
+    for (int i = 0; i < 4; i++) input.data[i] = (int8_t)(i + 1);
+    int8_t weights[4] = {1, 1, 1, 1};
+    const int64_t expected[16] = {
+        1, 1, 2, 2,
+        1, 1, 2, 2,
+        3, 3, 4, 4,
+        3, 3, 4, 4,
+    };
+    int64_t acc[16] = {0};
+    npu_deconv(&cfg, &input, weights, NULL, acc);
+    for (int i = 0; i < 16; i++)
+        ASSERT_EQ(acc[i], expected[i], "deconv 2x2");
+    tensor_free(&input);
+}
+
+static void test_deconv_int16_acc_wrap(void)
+{
+    printf("Test: Deconv INT16 accumulator wrap...\n");
+    const int channels = 20000;
+    layer_config_t cfg = {0};
+    cfg.op_type = OP_DECONV;
+    cfg.data_type = DTYPE_INT16;
+    cfg.in_h = 1; cfg.in_w = 1; cfg.in_c = channels;
+    cfg.out_h = 1; cfg.out_w = 1; cfg.out_c = 1;
+    cfg.kernel_h = 1; cfg.kernel_w = 1;
+
+    tensor_t input = tensor_alloc_i16(1, 1, channels);
+    int16_t *weights = malloc((size_t)channels * sizeof(*weights));
+    if (weights == NULL) {
+        printf("  FAIL: deconv INT16 allocation\n");
+        tests_failed++;
+        tensor_free(&input);
+        return;
+    }
+    for (int i = 0; i < channels; i++) {
+        input.data_i16[i] = 32767;
+        weights[i] = 32767;
+    }
+    int64_t acc[1] = {0};
+    npu_deconv(&cfg, &input, (const int8_t *)weights, NULL, acc);
+    ASSERT_EQ(acc[0], INT64_C(3881339735584), "deconv INT16 44-bit wrap");
+    free(weights);
+    tensor_free(&input);
+}
+
 /* ─── Main ─── */
 int main(void)
 {
@@ -388,6 +446,8 @@ int main(void)
     test_dwconv_int16();
     test_fc_int16();
     test_pooling_int16();
+    test_deconv_2x2_stride2();
+    test_deconv_int16_acc_wrap();
 
     printf("\n=== Results: %d passed, %d failed ===\n",
            tests_passed, tests_failed);
