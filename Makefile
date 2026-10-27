@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Usage:
-#   make                          # Default config (16×16, 128KB, INT8+INT16)
-#   make CFLAGS_HW="-DNPU_ARRAY_SIZE=4 -DNPU_SPAD_SIZE_KB=32 -DNPU_HAS_INT16=0"
+#   make                          # Default: 64-MAC row, 8 DW lanes, 164KB
+#   make CFLAGS_HW="-DNPU_MAC_LANES=32 -DNPU_DW_CHANNELS=4 -DNPU_HAS_INT16=0"
 #
 # Any NPU_* define in npu_config.h can be overridden via CFLAGS_HW.
 

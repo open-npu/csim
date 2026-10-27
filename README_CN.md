@@ -41,7 +41,8 @@ make test       # 运行单元测试
 编译时覆盖硬件配置：
 
 ```bash
-make CFLAGS="-DARRAY_SIZE=4 -DSPAD_KB=64"
+make CFLAGS_HW="-DNPU_MAC_LANES=64 -DNPU_DW_CHANNELS=8 \
+  -DNPU_ACT_BANK_SIZE=24576 -DNPU_WEIGHT_BUF_SIZE=81920"
 ```
 
 ## 相关仓库
