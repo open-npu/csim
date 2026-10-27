@@ -83,7 +83,8 @@ void npu_deconv(const layer_config_t *cfg,
                         for (int ic = 0; ic < in_c; ic++) {
                             int w_idx = npu_conv_w_index(cfg->wgt_layout, oc,
                                                          k_base + ic,
-                                                         out_c, w_stride_oc);
+                                                         out_c, w_stride_oc,
+                                                         is_int16 ? 2 : 1);
                             if (is_int16) {
                                 int16_t in_val = tensor_get_i16(input, ih, iw, ic);
                                 int16_t w_val  = weights_i16[w_idx];

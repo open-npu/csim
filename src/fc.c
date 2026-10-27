@@ -2,7 +2,7 @@
  * Open-NPU C Functional Simulator
  * fc.c — Fully connected layer (bit-exact)
  *
- * Weight layout: [out_c][in_c]
+ * Weight layout: OC-major or grouped K-major, selected by cfg->wgt_layout
  * Input layout:  NHWC with h=1, w=1, c=in_c
  *
  * RTL PE wraps accumulator at ACC_WIDTH bits on EVERY MAC cycle.
@@ -39,13 +39,16 @@ void npu_fc(const layer_config_t *cfg,
         int64_t acc = 0;
 
         for (int ic = 0; ic < in_c; ic++) {
+            int w_idx = npu_conv_w_index(cfg->wgt_layout, oc, ic,
+                                         out_c, in_c,
+                                         is_int16 ? 2 : 1);
             if (is_int16) {
                 int16_t in_val = input->data_i16[ic];
-                int16_t w_val  = weights_i16[oc * in_c + ic];
+                int16_t w_val  = weights_i16[w_idx];
                 acc += (int64_t)in_val * (int64_t)w_val;
             } else {
                 int8_t in_val = input->data[ic];
-                int8_t w_val  = weights[oc * in_c + ic];
+                int8_t w_val  = weights[w_idx];
                 acc += (int64_t)in_val * (int64_t)w_val;
             }
             acc = trunc_acc(acc);
