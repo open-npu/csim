@@ -346,6 +346,52 @@ static void test_fc_int16(void)
     tensor_free(&input);
 }
 
+static void test_fc_kmajor_narrow_group(void)
+{
+    printf("Test: FC K-major 32-channel groups...\n");
+
+    enum { IN_C = 1280, OUT_C = 33, LANES = 32 };
+    layer_config_t cfg = {0};
+    cfg.op_type = OP_FC;
+    cfg.data_type = DTYPE_INT16;
+    cfg.wgt_layout = NPU_WGT_LAYOUT_K_MAJOR;
+    cfg.in_h = 1; cfg.in_w = 1; cfg.in_c = IN_C;
+    cfg.out_h = 1; cfg.out_w = 1; cfg.out_c = OUT_C;
+
+    tensor_t input = tensor_alloc_i16(1, 1, IN_C);
+    int16_t *weights = calloc((size_t)IN_C * OUT_C, sizeof(*weights));
+    int64_t *acc = calloc(OUT_C, sizeof(*acc));
+    if (!weights || !acc) {
+        printf("  FAIL: allocation\n");
+        tests_failed++;
+        free(weights);
+        free(acc);
+        tensor_free(&input);
+        return;
+    }
+
+    for (int ic = 0; ic < IN_C; ic++)
+        input.data_i16[ic] = 1;
+    for (int oc = 0; oc < OUT_C; oc++) {
+        int group = oc / LANES;
+        int group_w = OUT_C - group * LANES;
+        if (group_w > LANES) group_w = LANES;
+        for (int ic = 0; ic < IN_C; ic++) {
+            int idx = group * LANES * IN_C + ic * group_w
+                    + (oc - group * LANES);
+            weights[idx] = 1;
+        }
+    }
+
+    npu_fc(&cfg, &input, (const int8_t *)weights, NULL, acc);
+    for (int oc = 0; oc < OUT_C; oc++)
+        ASSERT_EQ(acc[oc], IN_C, "fc K-major narrow group");
+
+    free(weights);
+    free(acc);
+    tensor_free(&input);
+}
+
 /* ─── Test 9: Pooling INT16 ─── */
 static void test_pooling_int16(void)
 {
@@ -445,6 +491,7 @@ int main(void)
     test_conv2d_int16();
     test_dwconv_int16();
     test_fc_int16();
+    test_fc_kmajor_narrow_group();
     test_pooling_int16();
     test_deconv_2x2_stride2();
     test_deconv_int16_acc_wrap();

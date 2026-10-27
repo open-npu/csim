@@ -95,7 +95,7 @@ void npu_conv2d(const layer_config_t *cfg,
                                 w_idx = npu_conv_w_index(
                                     cfg->wgt_layout, oc,
                                     fh * w_stride_kh + fw * w_stride_kw + ic,
-                                    out_c, k_depth);
+                                    out_c, k_depth, is_int16 ? 2 : 1);
                                 if (is_int16)
                                     w_val = weights_i16[w_idx];
                                 else
