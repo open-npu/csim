@@ -454,6 +454,12 @@ static int execute_layer_tiled(const layer_config_t *cfg,
         if (weight_per_oc > 0) {
             tile_oc = MIN(cfg->out_c, (int)(NPU_WEIGHT_BUF_SIZE / (unsigned)weight_per_oc));
             if (tile_oc < 1) tile_oc = 1;
+            if (cfg->wgt_layout == NPU_WGT_LAYOUT_K_MAJOR) {
+                int row_group = NPU_MAC_LANES;
+                while (row_group > tile_oc)
+                    row_group >>= 1;
+                tile_oc = row_group;
+            }
         }
     }
 
@@ -700,19 +706,12 @@ static int execute_layer_tiled(const layer_config_t *cfg,
                     tile_out = tensor_alloc_i8(actual_out_h, actual_out_w, tile_out_c);
                 }
 
-                /* Slice weights for this OC group. A K-major blob cannot be
-                 * cut at an arbitrary channel, but the compiler only emits
-                 * K-major when the whole tensor fits the weight buffer, so
-                 * tile_oc == out_c and this slice is always the identity. */
+                /* Slice weights at a compiler row-group boundary. K-major
+                 * groups are contiguous even though elements inside each
+                 * group are interleaved by K. */
                 const int8_t *w_slice = weights;
                 if (has_weights && weights) {
                     int w_per_oc = cfg->kernel_h * cfg->kernel_w * cfg->in_c * elem_size;
-                    if (cfg->wgt_layout == NPU_WGT_LAYOUT_K_MAJOR && oc_start != 0) {
-                        fprintf(stderr,
-                                "Error: K-major weights split at oc_start=%d\n",
-                                oc_start);
-                        return -1;
-                    }
                     w_slice = weights + oc_start * w_per_oc;
                 }
 
