@@ -6,7 +6,7 @@
  *   make CFLAGS_HW="-DNPU_DW_CHANNELS=8 -DNPU_ACT_BANK_SIZE=24576 \
  *                   -DNPU_WEIGHT_BUF_SIZE=16384 -DNPU_HAS_INT16=0"
  *
- * Defaults match the 64-MAC row, 8-lane depthwise bank, and 164KB scratchpad.
+ * Defaults match the 64-MAC row, 8-lane depthwise bank, and 172KB scratchpad.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,7 +25,7 @@
 #endif
 
 #ifndef NPU_SPAD_SIZE_KB
-#define NPU_SPAD_SIZE_KB     164     /* HW_CONFIG-reported profile size */
+#define NPU_SPAD_SIZE_KB     172     /* HW_CONFIG-reported profile size */
 #endif
 
 #ifndef NPU_HAS_INT16
