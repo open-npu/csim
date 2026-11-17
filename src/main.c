@@ -452,14 +452,19 @@ static int execute_layer_tiled(const layer_config_t *cfg,
     if (has_weights) {
         int weight_per_oc = cfg->kernel_h * cfg->kernel_w * cfg->in_c * elem_size;
         if (weight_per_oc > 0) {
-            tile_oc = MIN(cfg->out_c, (int)(NPU_WEIGHT_BUF_SIZE / (unsigned)weight_per_oc));
-            if (tile_oc < 1) tile_oc = 1;
             if (cfg->wgt_layout == NPU_WGT_LAYOUT_K_MAJOR) {
                 int row_group = NPU_MAC_LANES;
-                while (row_group > tile_oc)
+                while (row_group > 1 &&
+                       (unsigned)row_group * (unsigned)weight_per_oc >
+                           NPU_WEIGHT_BUF_SIZE)
                     row_group >>= 1;
-                tile_oc = row_group;
+                tile_oc = MIN(cfg->out_c, row_group);
+            } else {
+                tile_oc = MIN(cfg->out_c,
+                              (int)(NPU_WEIGHT_BUF_SIZE /
+                                    (unsigned)weight_per_oc));
             }
+            if (tile_oc < 1) tile_oc = 1;
         }
     }
 
