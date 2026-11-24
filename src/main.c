@@ -1140,8 +1140,17 @@ int main(int argc, char *argv[])
     for (uint32_t i = 0; i < header.num_layers; i++) {
         layer_config_t *cfg = &layers[i];
 
-        /* ── Fused block detection ── */
-        if ((cfg->sched_ctrl & SCHED_CTRL_FUSE_START) && i + 2 < header.num_layers) {
+        /* ── Fused block detection (strict 3-layer Conv1x1 -> DW -> Conv1x1) ── */
+        if (!getenv("DUMP_LAYERS")
+                && (cfg->sched_ctrl & SCHED_CTRL_FUSE_START)
+                && i + 2 < header.num_layers
+                && (layers[i + 1].sched_ctrl & SCHED_CTRL_FUSE_MID)
+                && (layers[i + 2].sched_ctrl & SCHED_CTRL_FUSE_END)
+                && layers[i].op_type == OP_CONV2D
+                && layers[i + 1].op_type == OP_DW_CONV
+                && layers[i + 2].op_type == OP_CONV2D
+                && layers[i].kernel_h == 1 && layers[i].kernel_w == 1
+                && layers[i + 2].kernel_h == 1 && layers[i + 2].kernel_w == 1) {
             layer_config_t *cfg_a = &layers[i];
             layer_config_t *cfg_b = &layers[i + 1];
             layer_config_t *cfg_c = &layers[i + 2];
