@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include "npu_operators.h"
 
-/* ACC_WIDTH is configurable. Default 40 (model_x), 44 for synth_res (C_in≤256).
+/* ACC_WIDTH is configurable (default 44 for wide-channel models, 40 optional).
  * CSIM reads it from environment variable ACC_WIDTH at runtime. */
 static int get_acc_width(void) {
     const char *env = getenv("ACC_WIDTH");

@@ -13,7 +13,7 @@
 
 /* RTL PPU uses configurable ACC_WIDTH signed data path at Stage 1 (bias addition).
  * Simulate signed wrap: extract bits [ACC_WIDTH-1:0] then sign-extend.
- * ACC_WIDTH read from env var (default 40, set 44 for synth_res). */
+ * ACC_WIDTH read from env var (default 44, optional 40). */
 static int get_acc_width(void) {
     const char *env = getenv("ACC_WIDTH");
     return env ? atoi(env) : 44;
